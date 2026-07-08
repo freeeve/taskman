@@ -181,6 +181,97 @@ func Dups(tasks []Task) map[int]bool {
 	return dup
 }
 
+// Gaps returns the unused numbers below the highest in use, ascending.
+func Gaps(tasks []Task) []int {
+	used := map[int]bool{}
+	max := 0
+	for _, t := range tasks {
+		if t.HasNum {
+			used[t.Num] = true
+			if t.Num > max {
+				max = t.Num
+			}
+		}
+	}
+	var gaps []int
+	for n := 1; n < max; n++ {
+		if !used[n] {
+			gaps = append(gaps, n)
+		}
+	}
+	return gaps
+}
+
+// Repair is one planned renumbering: a duplicate-numbered task and the free
+// number it moves to.
+type Repair struct {
+	T   Task
+	Num int
+}
+
+// PlanRepairs resolves duplicate numbers deterministically: per duplicated
+// number the most advanced task keeps it (done > in-progress > pending,
+// ledger order breaking ties -- the furthest-along task is the one history
+// most likely references), and each loser takes the lowest free number,
+// filling gaps before extending past the maximum.
+func PlanRepairs(tasks []Task) []Repair {
+	used := map[int]bool{}
+	byNum := map[int][]Task{}
+	for _, t := range tasks {
+		if t.HasNum {
+			used[t.Num] = true
+			byNum[t.Num] = append(byNum[t.Num], t)
+		}
+	}
+	nums := make([]int, 0, len(byNum))
+	for n, group := range byNum {
+		if len(group) > 1 {
+			nums = append(nums, n)
+		}
+	}
+	sort.Ints(nums)
+	free := 1
+	var plan []Repair
+	for _, n := range nums {
+		group := byNum[n]
+		keep := 0
+		for i, t := range group {
+			if t.Status > group[keep].Status {
+				keep = i
+			}
+		}
+		for i, t := range group {
+			if i == keep {
+				continue
+			}
+			for used[free] {
+				free++
+			}
+			used[free] = true
+			plan = append(plan, Repair{T: t, Num: free})
+		}
+	}
+	return plan
+}
+
+// Renumber moves a numbered task to num, renaming the file and restamping
+// the number in its H1 title.
+func (t Task) Renumber(num int) (Task, error) {
+	if !t.HasNum {
+		return t, fmt.Errorf("%s has no number; use adopt", t.File)
+	}
+	nt := t
+	nt.Num = num
+	nt.File = nt.Stem() + t.Status.suffix() + ".md"
+	if err := renumberTitle(t.Path(), num, ""); err != nil {
+		return t, err
+	}
+	if err := os.Rename(t.Path(), nt.Path()); err != nil {
+		return t, err
+	}
+	return nt, nil
+}
+
 // Slugify folds a description to the ledger's kebab case: lowercase
 // alphanumeric runs joined by single dashes.
 func Slugify(desc string) string {
@@ -276,26 +367,30 @@ func (t Task) Adopt(num int) (Task, error) {
 // titleNumRE matches an H1 that already leads with a task number.
 var titleNumRE = regexp.MustCompile(`^# \d+ --`)
 
-// renumberTitle prefixes the file's H1 with "NNN -- " unless one is present.
+// renumberTitle stamps num into the file's H1: an existing leading number is
+// replaced, an unnumbered title gains a "NNN -- " prefix. A non-empty
+// filedAs not already cited in the body is recorded as an adoption
+// breadcrumb after the title.
 func renumberTitle(path string, num int, filedAs string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
 	lines := strings.SplitN(string(data), "\n", 2)
-	if !strings.HasPrefix(lines[0], "# ") || titleNumRE.MatchString(lines[0]) {
+	if !strings.HasPrefix(lines[0], "# ") {
 		return nil
 	}
-	lines[0] = fmt.Sprintf("# %03d -- %s", num, strings.TrimPrefix(lines[0], "# "))
+	if titleNumRE.MatchString(lines[0]) {
+		lines[0] = titleNumRE.ReplaceAllString(lines[0], fmt.Sprintf("# %03d --", num))
+	} else {
+		lines[0] = fmt.Sprintf("# %03d -- %s", num, strings.TrimPrefix(lines[0], "# "))
+	}
 	out := lines[0]
+	if filedAs != "" && !strings.Contains(string(data), filedAs) {
+		out += fmt.Sprintf("\n\n(Adopted from cross-repo ask %s.md.)", filedAs)
+	}
 	if len(lines) > 1 {
 		out += "\n" + lines[1]
-	}
-	if !strings.Contains(out, filedAs) {
-		out = lines[0] + fmt.Sprintf("\n\n(Adopted from cross-repo ask %s.md.)", filedAs)
-		if len(lines) > 1 {
-			out += "\n" + lines[1]
-		}
 	}
 	return os.WriteFile(path, []byte(out), 0o644)
 }

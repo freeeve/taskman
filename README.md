@@ -28,6 +28,9 @@ taskman adopt <name>         renumber a prefixed cross-repo ask into the
 taskman file [-as prefix] <repo-dir> <description>
                              drop a prefixed ask into another repo's tasks/
                              (prefix defaults to the current repo's dir name)
+taskman fix [-n]             repair the ledger: duplicate numbers are
+                             renumbered into the lowest free slots (gaps
+                             first) with the H1 restamped; -n reports only
 ```
 
 The `tasks/` directory is discovered by walking up from the current
@@ -35,6 +38,19 @@ directory, so any subdirectory of a repo works. `start`/`done`/`reopen`
 accept a task number or a unique slug fragment; a duplicate number (the
 ledgers have historical collisions) or ambiguous fragment errors with the
 candidates instead of guessing.
+
+Every mutating command commits the touched task files automatically with a
+pathspec-scoped `git add`/`git commit` (`chore(tasks): …`), so a concurrent
+session's staged work in the same repo is never swept into the commit. Pass
+`-no-commit` after the subcommand to skip it; outside a git repo the
+operation still succeeds with a warning.
+
+`fix` picks each duplicate's keeper deterministically -- the most advanced
+status wins (done > in-progress > pending; ledger order breaks ties), since
+the furthest-along task is the one history most likely references. Gaps no
+duplicate can fill are reported but never compacted: task numbers appear in
+commit messages and docs, so reusing or shifting them would corrupt
+references.
 
 Cross-repo asks are filed with a prefix rather than a number because
 numbering authority stays with the receiving repo -- two sessions filing

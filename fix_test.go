@@ -55,6 +55,34 @@ func TestPlanRepairsNoDups(t *testing.T) {
 	}
 }
 
+// TestRenumberTitleSeparators pins the H1 restamp across the separator
+// variants found in real ledgers: an existing number is replaced whatever
+// dash spelled it, while date-led and unnumbered titles gain a prefix.
+func TestRenumberTitleSeparators(t *testing.T) {
+	cases := map[string]string{
+		"# 012 -- Old double dash": "# 027 -- Old double dash",
+		"# 012 — Em dash task":     "# 027 -- Em dash task",
+		"# 012 – En dash task":     "# 027 -- En dash task",
+		"# 012 - Spaced hyphen":    "# 027 -- Spaced hyphen",
+		"# 2026-07 report":         "# 027 -- 2026-07 report",
+		"# Unnumbered title":       "# 027 -- Unnumbered title",
+	}
+	for in, want := range cases {
+		path := filepath.Join(t.TempDir(), "t.md")
+		if err := os.WriteFile(path, []byte(in+"\n\nBody.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := renumberTitle(path, 27, ""); err != nil {
+			t.Fatal(err)
+		}
+		data, _ := os.ReadFile(path)
+		got := strings.SplitN(string(data), "\n", 2)[0]
+		if got != want {
+			t.Errorf("renumberTitle(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestRenumberRestampsTitle(t *testing.T) {
 	dir := ledger(t, "007_seven.md")
 	path := filepath.Join(dir, "003_movable.in-progress.md")

@@ -364,8 +364,11 @@ func (t Task) Adopt(num int) (Task, error) {
 	return nt, nil
 }
 
-// titleNumRE matches an H1 that already leads with a task number.
-var titleNumRE = regexp.MustCompile(`^# \d+ --`)
+// titleNumRE matches an H1 that already leads with a task number, tolerating
+// the separator variants found in older ledgers: --, em/en dash, or a spaced
+// hyphen. A bare unspaced hyphen is deliberately NOT a separator so titles
+// opening with a date ("# 2026-07 report") are treated as unnumbered.
+var titleNumRE = regexp.MustCompile(`^# \d+\s*(?:--|\x{2014}|\x{2013}| - )\s*`)
 
 // renumberTitle stamps num into the file's H1: an existing leading number is
 // replaced, an unnumbered title gains a "NNN -- " prefix. A non-empty
@@ -381,7 +384,7 @@ func renumberTitle(path string, num int, filedAs string) error {
 		return nil
 	}
 	if titleNumRE.MatchString(lines[0]) {
-		lines[0] = titleNumRE.ReplaceAllString(lines[0], fmt.Sprintf("# %03d --", num))
+		lines[0] = titleNumRE.ReplaceAllString(lines[0], fmt.Sprintf("# %03d -- ", num))
 	} else {
 		lines[0] = fmt.Sprintf("# %03d -- %s", num, strings.TrimPrefix(lines[0], "# "))
 	}

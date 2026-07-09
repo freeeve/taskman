@@ -71,3 +71,62 @@ Marking it `done` is a lie. Deleting it loses the reasoning.
 
 `~/taskman` had no `tasks/` directory; filing this created it. If you would
 rather this repo track its own work as GitHub issues, say so and I will move it.
+
+Answered: the ledger stays. This repo tracks its own work in `tasks/`.
+
+## Outcome
+
+Implemented in 95655cb, released as v0.4.0.
+
+**Deferred is a flag, not a fourth status.** The open question resolved in
+favour of the flag, and the reason is visible in the code: `PlanRepairs`
+compares `t.Status > group[keep].Status` to pick which duplicate keeps a
+contested number. A fourth `Status` value would have to sit somewhere in that
+ordinal comparison, and every position is a lie. As a flag, deferral never
+enters the comparison at all -- a deferred task contests a number exactly as
+the pending or in-progress task it still is. `TestDeferredNumberContest` pins
+this.
+
+On disk the flag is a `.deferred` marker layered on the status suffix, so it
+stays greppable and consistent with the existing convention:
+`001_slug.deferred.md`, or `001_slug.in-progress.deferred.md` for work that
+was already underway when it was held. `resume` restores the status
+underneath; `start`/`done`/`reopen` clear the deferral, on the grounds that
+acting on a task ends the hold. Deferring a `done` task is refused -- there is
+no decision left to wait on.
+
+`-reason` is **required**, going beyond the "consider requiring" in Scope. The
+task's own argument decided it: the filename cannot carry a why, and an
+unexplained deferral decays into an unexplained `pending`. It is appended to
+the body as a dated `## Deferred` section; `resume` appends `## Resumed`, so
+the file keeps the log after the filename stops carrying it.
+
+Two deviations from Acceptance, both deliberate:
+
+- *"`taskman next` skips it"* does not apply. `next` prints the next free
+  **number**, not the next task to work on -- an easy misread from outside this
+  repo. Nothing about deferral touches numbering, so `next` is unchanged. What
+  actually keeps deferred work out of the "what should I pick up" set is its
+  absence from `taskman list`, which is where the cron-loop agent looks.
+- *"`resume` returns it to pending"* holds for the motivating case but is
+  stated too narrowly: `resume` returns the task to whatever status it was
+  deferred from. For a pending task that is pending.
+
+`list` prints a `N deferred (taskman list -all)` line when it hides any, so a
+deferred task cannot silently vanish from the ledger -- the failure mode of
+hiding it in the first place.
+
+The `deferred` vs `blocked` open question needs no answer yet: one state with a
+mandatory reason string, as the task proposed. The distinction lives in the
+reason.
+
+Verified by driving the real binary against libcat's actual 247 case
+(defer -> hidden from `list` -> shown under `-all` -> `resume`), plus a
+duplicate-number contest between a deferred and an in-progress task, in which
+the in-progress task keeps the number and the deferred one is renumbered with
+its marker intact. Tests at 85.5% statement coverage; `FuzzParseName` now
+round-trips the deferral marker through 3M execs.
+
+**Follow-up for libcat:** `taskman defer` is available as of v0.4.0, so
+libcat's `tasks/247` can now be marked
+`247_<slug>.deferred.md` with the maintainer's reasoning recorded in the body.

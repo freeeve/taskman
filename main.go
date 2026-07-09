@@ -68,9 +68,10 @@ Usage:
   taskman start <n|slug>       mark in-progress
   taskman done <n|slug>        mark done
   taskman reopen <n|slug>      mark pending again
-  taskman adopt <name>         renumber a prefixed cross-repo ask into the ledger
-  taskman file [-as prefix] <repo-dir> <description>
+  taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
+  taskman file [-as filer] <repo-dir> <description>
                                file a cross-repo ask into another repo's tasks/
+                               at that ledger's next number, committed there
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
 
@@ -231,47 +232,60 @@ func cmdAdopt(args []string) error {
 	return nil
 }
 
-// cmdFile writes a prefixed cross-repo ask into another repo's tasks/ and
-// commits it there, defaulting the filer prefix to the current ledger's repo
+// cmdFile writes a cross-repo ask into another repo's tasks/ at that
+// ledger's next free number and commits it there -- the immediate pathspec
+// commit is what makes the number claim safe, so no filer-prefix indirection
+// is needed anymore (taskman adopt remains for legacy prefixed asks). The
+// filer name recorded in the body defaults to the current ledger's repo
 // directory name.
 func cmdFile(args []string) error {
 	fs := flag.NewFlagSet("file", flag.ContinueOnError)
-	as := fs.String("as", "", "filer prefix (default: current repo directory name)")
+	as := fs.String("as", "", "filer name recorded in the body (default: current repo directory name)")
 	noCommit := fs.Bool("no-commit", false, "skip the git commit")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	rest := fs.Args()
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: taskman file [-as prefix] [-no-commit] <repo-dir> <description>")
+		return fmt.Errorf("usage: taskman file [-as filer] [-no-commit] <repo-dir> <description>")
 	}
 	repo, desc := rest[0], strings.TrimSpace(strings.Join(rest[1:], " "))
-	prefix := *as
-	if prefix == "" {
+	filer := *as
+	if filer == "" {
 		if dir, err := FindTasksDir("."); err == nil {
-			prefix = filepath.Base(filepath.Dir(dir))
+			filer = filepath.Base(filepath.Dir(dir))
 		} else if wd, err := os.Getwd(); err == nil {
-			prefix = filepath.Base(wd)
+			filer = filepath.Base(wd)
 		}
 	}
-	prefix = Slugify(prefix)
+	filer = Slugify(filer)
 	slug := Slugify(desc)
-	if prefix == "" || slug == "" {
-		return fmt.Errorf("empty prefix or slug (prefix %q, description %q)", prefix, desc)
+	if filer == "" || slug == "" {
+		return fmt.Errorf("empty filer or slug (filer %q, description %q)", filer, desc)
 	}
 	dir := filepath.Join(repo, "tasks")
 	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
 		return fmt.Errorf("%s has no tasks/ directory", repo)
 	}
-	path := filepath.Join(dir, prefix+"_"+slug+".md")
-	body := fmt.Sprintf("# %s\n\nFiled from %s on %s (cross-repo ask; renumber on adoption: taskman adopt %s_%s).\n",
-		desc, prefix, time.Now().Format("2006-01-02"), prefix, slug)
+	tasks, err := Load(dir)
+	if err != nil {
+		return err
+	}
+	for _, t := range tasks {
+		if t.Slug == slug {
+			return fmt.Errorf("already filed as %s", t.File)
+		}
+	}
+	num := NextNum(tasks)
+	path := filepath.Join(dir, fmt.Sprintf("%03d_%s.md", num, slug))
+	body := fmt.Sprintf("# %03d -- %s\n\nFiled from %s on %s (cross-repo ask).\n",
+		num, desc, filer, time.Now().Format("2006-01-02"))
 	if err := create(path, body); err != nil {
 		return err
 	}
 	fmt.Println(path)
 	autoCommit(*noCommit, dir,
-		fmt.Sprintf("chore(tasks): file cross-repo ask %s_%s", prefix, slug), path)
+		fmt.Sprintf("chore(tasks): file %03d %s (cross-repo ask from %s)", num, slug, filer), path)
 	return nil
 }
 

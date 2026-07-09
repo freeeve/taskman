@@ -228,26 +228,41 @@ func TestCommands(t *testing.T) {
 		t.Error("bogus command must error")
 	}
 
-	// File an ask into a second repo, then adopt it there.
+	// File an ask into a second repo: it lands at THAT ledger's next number
+	// (the immediate commit makes the claim safe), body crediting the filer.
 	other := filepath.Join(t.TempDir(), "otherrepo")
-	if err := os.MkdirAll(filepath.Join(other, "tasks"), 0o755); err != nil {
+	otherTasks := filepath.Join(other, "tasks")
+	if err := os.MkdirAll(otherTasks, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherTasks, "004_existing.md"), []byte("# x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	if err := run([]string{"file", other, "Please fix the flux capacitor"}); err != nil {
 		t.Fatalf("file: %v", err)
 	}
-	ask := filepath.Join(other, "tasks", "myrepo_please-fix-the-flux-capacitor.md")
-	if _, err := os.Stat(ask); err != nil {
+	ask := filepath.Join(otherTasks, "005_please-fix-the-flux-capacitor.md")
+	data, err := os.ReadFile(ask)
+	if err != nil {
 		t.Fatalf("filed ask: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "# 005 -- Please fix the flux capacitor\n") ||
+		!strings.Contains(string(data), "Filed from myrepo") {
+		t.Errorf("ask body:\n%s", data)
 	}
 	if err := run([]string{"file", other, "Please fix the flux capacitor"}); err == nil {
 		t.Error("re-filing the same ask must refuse to overwrite")
 	}
+	// Legacy prefixed asks still adopt.
+	legacy := filepath.Join(otherTasks, "qbd_old-style-ask.md")
+	if err := os.WriteFile(legacy, []byte("# Old style ask\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Chdir(other)
-	if err := run([]string{"adopt", "myrepo_please-fix-the-flux-capacitor"}); err != nil {
+	if err := run([]string{"adopt", "qbd_old-style-ask"}); err != nil {
 		t.Fatalf("adopt: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(other, "tasks", "001_please-fix-the-flux-capacitor.md")); err != nil {
+	if _, err := os.Stat(filepath.Join(otherTasks, "006_old-style-ask.md")); err != nil {
 		t.Fatalf("adopted file: %v", err)
 	}
 }

@@ -8,9 +8,9 @@ repo that owns the ledger.
 001_description.md              pending
 001_description.in-progress.md  in progress
 001_description.done.md         done
-qbd_description.md              cross-repo ask filed by another repo's
-                                session ("qbd" = the filer), unnumbered
-                                until this repo adopts it
+qbd_description.md              LEGACY cross-repo ask filed unnumbered by
+                                another repo's session ("qbd" = the filer);
+                                renumber with `taskman adopt`
 ```
 
 ## Usage
@@ -23,11 +23,13 @@ taskman new <description>    create the next numbered pending task
 taskman start <n|slug>       mark in-progress   (rename)
 taskman done <n|slug>        mark done          (rename)
 taskman reopen <n|slug>      back to pending    (rename)
-taskman adopt <name>         renumber a prefixed cross-repo ask into the
-                             ledger and stamp the number into its H1
-taskman file [-as prefix] <repo-dir> <description>
-                             drop a prefixed ask into another repo's tasks/
-                             (prefix defaults to the current repo's dir name)
+taskman adopt <name>         renumber a legacy prefixed cross-repo ask into
+                             the ledger and stamp the number into its H1
+taskman file [-as filer] <repo-dir> <description>
+                             file a cross-repo ask into another repo's
+                             tasks/ at THAT ledger's next number, committed
+                             there immediately (filer credit defaults to the
+                             current repo's dir name; duplicate slugs refuse)
 taskman fix [-n]             repair the ledger: duplicate numbers are
                              renumbered into the lowest free slots (gaps
                              first) with the H1 restamped; -n reports only
@@ -52,11 +54,11 @@ duplicate can fill are reported but never compacted: task numbers appear in
 commit messages and docs, so reusing or shifting them would corrupt
 references.
 
-Cross-repo asks are filed with a prefix rather than a number because
-numbering authority stays with the receiving repo -- two sessions filing
-concurrently would otherwise mint the same number. `taskman adopt` assigns
-the next free number at adoption time and records the filed name as a
-breadcrumb.
+Cross-repo asks are numbered at filing time: the immediate pathspec commit
+in the receiving repo is what makes the number claim safe (the historical
+prefix convention existed because asks used to sit uncommitted, invisible to
+concurrent sessions). `taskman adopt` remains for legacy prefixed asks and
+assigns the next free number, recording the filed name as a breadcrumb.
 
 ## Install
 

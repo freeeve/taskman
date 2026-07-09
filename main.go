@@ -1,7 +1,8 @@
 // Command taskman manages the tasks/ ledger convention shared by Eve's
 // repos: one numbered markdown file per task, status carried by filename
-// (001_slug.md -> .in-progress.md -> .done.md), cross-repo asks filed with a
-// filer prefix (qbd_slug.md) and renumbered on adoption. Every mutating
+// (001_slug.md -> .in-progress.md -> .done.md), deferral carried by an
+// orthogonal .deferred marker on top of that status, cross-repo asks filed
+// with a filer prefix (qbd_slug.md) and renumbered on adoption. Every mutating
 // command commits the touched task files with a git pathspec, so concurrent
 // sessions' staged work is never swept along (-no-commit opts out).
 package main
@@ -42,6 +43,10 @@ func run(args []string) error {
 		return cmdStatus(rest, Done)
 	case "reopen":
 		return cmdStatus(rest, Pending)
+	case "defer":
+		return cmdDefer(rest)
+	case "resume":
+		return cmdResume(rest)
 	case "adopt":
 		return cmdAdopt(rest)
 	case "file":
@@ -62,12 +67,16 @@ func usage() {
 	fmt.Fprint(os.Stderr, `taskman - tasks/ ledger helper
 
 Usage:
-  taskman [list] [-all]        open tasks (-all includes done)
+  taskman [list] [-all]        open tasks (-all includes done and deferred)
   taskman next                 next free task number
   taskman new <description>    create the next numbered pending task
   taskman start <n|slug>       mark in-progress
   taskman done <n|slug>        mark done
   taskman reopen <n|slug>      mark pending again
+  taskman defer -reason <why> <n|slug>
+                               hold on an external decision: hidden from list,
+                               the reason recorded in the task body
+  taskman resume <n|slug>      lift a deferral, restoring the prior status
   taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
   taskman file [-as filer] <repo-dir> <description>
                                file a cross-repo ask into another repo's tasks/
@@ -92,10 +101,13 @@ func tasksHere() (string, []Task, error) {
 }
 
 // cmdList prints the ledger, open tasks by default, flagging duplicate
-// numbers and unadopted cross-repo asks.
+// numbers and unadopted cross-repo asks. Done and deferred tasks are hidden
+// without -all: keeping deferred work out of the "what should I pick up next"
+// set is the point of deferring it. Hidden deferrals are still counted, so
+// they cannot silently disappear from the ledger.
 func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
-	all := fs.Bool("all", false, "include done tasks")
+	all := fs.Bool("all", false, "include done and deferred tasks")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -105,9 +117,12 @@ func cmdList(args []string) error {
 	}
 	dups := Dups(tasks)
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
-	shown := 0
+	shown, deferred := 0, 0
 	for _, t := range tasks {
-		if t.Status == Done && !*all {
+		if t.Deferred && t.Status != Done {
+			deferred++
+		}
+		if (t.Status == Done || t.Deferred) && !*all {
 			continue
 		}
 		shown++
@@ -117,13 +132,16 @@ func cmdList(args []string) error {
 		} else if dups[t.Num] {
 			note = "DUPLICATE NUMBER (taskman fix)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", id, t.Status, t.Slug, note)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", id, t.StatusLabel(), t.Slug, note)
 	}
 	if err := w.Flush(); err != nil {
 		return err
 	}
 	if shown == 0 {
 		fmt.Printf("no open tasks in %s\n", dir)
+	}
+	if deferred > 0 && !*all {
+		fmt.Printf("%d deferred (taskman list -all)\n", deferred)
 	}
 	return nil
 }
@@ -197,6 +215,71 @@ func cmdStatus(args []string, s Status) error {
 	fmt.Printf("%s -> %s\n", t.File, nt.File)
 	autoCommit(*noCommit, dir,
 		fmt.Sprintf("chore(tasks): %s %s", statusVerb[s], nt.Stem()),
+		t.Path(), nt.Path())
+	return nil
+}
+
+// cmdDefer holds a task on an external decision and commits the rename. The
+// reason is mandatory: an unexplained deferral decays into an unexplained
+// pending task, and the filename cannot carry the why.
+func cmdDefer(args []string) error {
+	fs := flag.NewFlagSet("defer", flag.ContinueOnError)
+	reason := fs.String("reason", "", "why the task is held (required)")
+	noCommit := fs.Bool("no-commit", false, "skip the git commit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: taskman defer -reason <why> [-no-commit] <number|slug>")
+	}
+	if strings.TrimSpace(*reason) == "" {
+		return fmt.Errorf("taskman defer requires -reason: record why this is held, not just that it is")
+	}
+	dir, tasks, err := tasksHere()
+	if err != nil {
+		return err
+	}
+	t, err := Find(tasks, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	nt, err := t.Defer(strings.TrimSpace(*reason), time.Now().Format("2006-01-02"))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s -> %s\n", t.File, nt.File)
+	autoCommit(*noCommit, dir,
+		fmt.Sprintf("chore(tasks): defer %s (%s)", nt.Stem(), strings.TrimSpace(*reason)),
+		t.Path(), nt.Path())
+	return nil
+}
+
+// cmdResume lifts a deferral, returning the task to the working set at the
+// status it held, and commits the rename.
+func cmdResume(args []string) error {
+	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	noCommit := fs.Bool("no-commit", false, "skip the git commit")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: taskman resume [-no-commit] <number|slug>")
+	}
+	dir, tasks, err := tasksHere()
+	if err != nil {
+		return err
+	}
+	t, err := Find(tasks, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	nt, err := t.Resume(time.Now().Format("2006-01-02"))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s -> %s\n", t.File, nt.File)
+	autoCommit(*noCommit, dir,
+		fmt.Sprintf("chore(tasks): resume %s", nt.Stem()),
 		t.Path(), nt.Path())
 	return nil
 }
@@ -310,7 +393,7 @@ func cmdFix(args []string) error {
 	for _, r := range plan {
 		nt := r.T
 		nt.Num = r.Num
-		nt.File = nt.Stem() + r.T.Status.suffix() + ".md"
+		nt.File = nt.Name()
 		fmt.Printf("%s -> %s (duplicate %03d)\n", r.T.File, nt.File, r.T.Num)
 		if *dry {
 			continue

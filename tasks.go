@@ -47,14 +47,20 @@ func (s Status) suffix() string {
 // Task is one tasks/ file. Numbered tasks carry Num; cross-repo asks filed by
 // another repo's session carry a non-numeric Prefix instead (numbering
 // authority stays with the receiving repo until adoption).
+//
+// Deferred is deliberately a flag rather than a fourth Status: deferral says
+// "not being worked, and that is a decision", which is orthogonal to how far
+// along the work is. Keeping it off the Status axis means PlanRepairs never
+// has to answer the meaningless question of whether deferred outranks pending.
 type Task struct {
-	Dir    string // the tasks/ directory
-	File   string // current basename
-	Num    int
-	HasNum bool
-	Prefix string // filer prefix for unadopted cross-repo asks ("" when numbered)
-	Slug   string
-	Status Status
+	Dir      string // the tasks/ directory
+	File     string // current basename
+	Num      int
+	HasNum   bool
+	Prefix   string // filer prefix for unadopted cross-repo asks ("" when numbered)
+	Slug     string
+	Status   Status
+	Deferred bool
 }
 
 // Path returns the task file's full path.
@@ -68,9 +74,33 @@ func (t Task) Stem() string {
 	return t.Prefix + "_" + t.Slug
 }
 
-// nameRE splits a task basename into stem and status: group 1 is the stem,
-// group 2 the optional status tag.
-var nameRE = regexp.MustCompile(`^(.+?)(?:\.(in-progress|done))?\.md$`)
+// Name returns the basename the task's current state encodes: stem, status
+// suffix, deferral marker, extension.
+func (t Task) Name() string {
+	name := t.Stem() + t.Status.suffix()
+	if t.Deferred {
+		name += ".deferred"
+	}
+	return name + ".md"
+}
+
+// StatusLabel renders the task's state for display, folding the orthogonal
+// deferral flag into the status column.
+func (t Task) StatusLabel() string {
+	switch {
+	case t.Deferred && t.Status == Pending:
+		return "deferred"
+	case t.Deferred:
+		return t.Status.String() + "/deferred"
+	default:
+		return t.Status.String()
+	}
+}
+
+// nameRE splits a task basename into stem, status and deferral marker: group 1
+// is the stem, group 2 the optional status tag, group 3 the optional
+// ".deferred" marker (which follows the status, since it modifies it).
+var nameRE = regexp.MustCompile(`^(.+?)(?:\.(in-progress|done))?(\.deferred)?\.md$`)
 
 // parseName decodes a tasks/ basename; ok is false for non-task files
 // (README.md, dotfiles, files without a number-or-prefix separator).
@@ -84,7 +114,7 @@ func parseName(dir, name string) (Task, bool) {
 	if i <= 0 || i == len(stem)-1 {
 		return Task{}, false
 	}
-	t := Task{Dir: dir, File: name, Slug: stem[i+1:]}
+	t := Task{Dir: dir, File: name, Slug: stem[i+1:], Deferred: m[3] != ""}
 	switch m[2] {
 	case "in-progress":
 		t.Status = InProgress
@@ -213,7 +243,9 @@ type Repair struct {
 // number the most advanced task keeps it (done > in-progress > pending,
 // ledger order breaking ties -- the furthest-along task is the one history
 // most likely references), and each loser takes the lowest free number,
-// filling gaps before extending past the maximum.
+// filling gaps before extending past the maximum. Deferral plays no part: it
+// is not a position on the progress axis, so a deferred task contests a number
+// exactly as the pending or in-progress task it still is.
 func PlanRepairs(tasks []Task) []Repair {
 	used := map[int]bool{}
 	byNum := map[int][]Task{}
@@ -262,7 +294,7 @@ func (t Task) Renumber(num int) (Task, error) {
 	}
 	nt := t
 	nt.Num = num
-	nt.File = nt.Stem() + t.Status.suffix() + ".md"
+	nt.File = nt.Name()
 	if err := renumberTitle(t.Path(), num, ""); err != nil {
 		return t, err
 	}
@@ -330,19 +362,75 @@ func one(hits []Task, key string) (Task, error) {
 	}
 }
 
-// SetStatus renames the task file to the given status and returns the
-// updated task.
+// SetStatus renames the task file to the given status and returns the updated
+// task. Moving a task along its lifecycle clears any deferral: start, done and
+// reopen all mean someone has acted on it, so the "held on an external
+// decision" mark no longer holds.
 func (t Task) SetStatus(s Status) (Task, error) {
-	if t.Status == s {
+	if t.Status == s && !t.Deferred {
 		return t, fmt.Errorf("%s is already %s", t.File, s)
 	}
 	nt := t
-	nt.Status = s
-	nt.File = t.Stem() + s.suffix() + ".md"
+	nt.Status, nt.Deferred = s, false
+	nt.File = nt.Name()
 	if err := os.Rename(t.Path(), nt.Path()); err != nil {
 		return t, err
 	}
 	return nt, nil
+}
+
+// Defer marks the task held on an external decision, recording why in the body
+// before the rename. A done task has no decision left to wait on, so it is
+// refused rather than silently reopened.
+func (t Task) Defer(reason, date string) (Task, error) {
+	if t.Deferred {
+		return t, fmt.Errorf("%s is already deferred", t.File)
+	}
+	if t.Status == Done {
+		return t, fmt.Errorf("%s is done; reopen it before deferring", t.File)
+	}
+	nt := t
+	nt.Deferred = true
+	nt.File = nt.Name()
+	if err := appendSection(t.Path(), "Deferred "+date, reason); err != nil {
+		return t, err
+	}
+	if err := os.Rename(t.Path(), nt.Path()); err != nil {
+		return t, err
+	}
+	return nt, nil
+}
+
+// Resume lifts a deferral, returning the task to the status it held when it
+// was deferred (pending, for the ordinary case).
+func (t Task) Resume(date string) (Task, error) {
+	if !t.Deferred {
+		return t, fmt.Errorf("%s is not deferred", t.File)
+	}
+	nt := t
+	nt.Deferred = false
+	nt.File = nt.Name()
+	if err := appendSection(t.Path(), "Resumed "+date, ""); err != nil {
+		return t, err
+	}
+	if err := os.Rename(t.Path(), nt.Path()); err != nil {
+		return t, err
+	}
+	return nt, nil
+}
+
+// appendSection adds a dated H2 section to a task file, so the reason a task
+// left or rejoined the working set outlives the filename that carried it.
+func appendSection(path, heading, body string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out := strings.TrimRight(string(data), "\n") + "\n\n## " + heading + "\n"
+	if body != "" {
+		out += "\n" + body + "\n"
+	}
+	return os.WriteFile(path, []byte(out), 0o644)
 }
 
 // Adopt renumbers an unadopted cross-repo ask into the ledger at num,
@@ -354,7 +442,7 @@ func (t Task) Adopt(num int) (Task, error) {
 	}
 	nt := t
 	nt.Num, nt.HasNum, nt.Prefix = num, true, ""
-	nt.File = nt.Stem() + t.Status.suffix() + ".md"
+	nt.File = nt.Name()
 	if err := renumberTitle(t.Path(), num, t.Stem()); err != nil {
 		return t, err
 	}

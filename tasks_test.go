@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,26 +24,51 @@ func ledger(t *testing.T, names ...string) string {
 	return dir
 }
 
+// capture runs fn with os.Stdout redirected and returns what it printed.
+func capture(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdout
+	os.Stdout = w
+	fn()
+	os.Stdout = saved
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	out, err := io.ReadAll(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(out)
+}
+
 func TestParseName(t *testing.T) {
 	cases := []struct {
-		name   string
-		ok     bool
-		num    int
-		hasNum bool
-		prefix string
-		slug   string
-		status Status
+		name     string
+		ok       bool
+		num      int
+		hasNum   bool
+		prefix   string
+		slug     string
+		status   Status
+		deferred bool
 	}{
-		{"001_first-thing.md", true, 1, true, "", "first-thing", Pending},
-		{"012_loc-sru-ingest.in-progress.md", true, 12, true, "", "loc-sru-ingest", InProgress},
-		{"025_full-corpus.done.md", true, 25, true, "", "full-corpus", Done},
-		{"qbd_spotlight-noindex.md", true, 0, false, "qbd", "spotlight-noindex", Pending},
-		{"qbd_ask.done.md", true, 0, false, "qbd", "ask", Done},
-		{"README.md", false, 0, false, "", "", Pending},
-		{"notes.txt", false, 0, false, "", "", Pending},
-		{".hidden_thing.md", false, 0, false, "", "", Pending},
-		{"_leading-sep.md", false, 0, false, "", "", Pending},
-		{"trailing_.md", false, 0, false, "", "", Pending},
+		{"001_first-thing.md", true, 1, true, "", "first-thing", Pending, false},
+		{"012_loc-sru-ingest.in-progress.md", true, 12, true, "", "loc-sru-ingest", InProgress, false},
+		{"025_full-corpus.done.md", true, 25, true, "", "full-corpus", Done, false},
+		{"247_ghcr-publish.deferred.md", true, 247, true, "", "ghcr-publish", Pending, true},
+		{"031_paused.in-progress.deferred.md", true, 31, true, "", "paused", InProgress, true},
+		{"qbd_spotlight-noindex.md", true, 0, false, "qbd", "spotlight-noindex", Pending, false},
+		{"qbd_ask.done.md", true, 0, false, "qbd", "ask", Done, false},
+		{"qbd_ask.deferred.md", true, 0, false, "qbd", "ask", Pending, true},
+		{"README.md", false, 0, false, "", "", Pending, false},
+		{"notes.txt", false, 0, false, "", "", Pending, false},
+		{".hidden_thing.md", false, 0, false, "", "", Pending, false},
+		{"_leading-sep.md", false, 0, false, "", "", Pending, false},
+		{"trailing_.md", false, 0, false, "", "", Pending, false},
 	}
 	for _, c := range cases {
 		task, ok := parseName("tasks", c.name)
@@ -54,9 +80,103 @@ func TestParseName(t *testing.T) {
 			continue
 		}
 		if task.Num != c.num || task.HasNum != c.hasNum || task.Prefix != c.prefix ||
-			task.Slug != c.slug || task.Status != c.status {
+			task.Slug != c.slug || task.Status != c.status || task.Deferred != c.deferred {
 			t.Errorf("parseName(%q) = %+v", c.name, task)
 		}
+		if task.Name() != c.name {
+			t.Errorf("parseName(%q).Name() = %q", c.name, task.Name())
+		}
+	}
+}
+
+// TestDeferLifecycle covers the flag's orthogonality: a deferral rides on top
+// of whatever status the task holds, resume restores that status, and any
+// explicit lifecycle move clears the deferral.
+func TestDeferLifecycle(t *testing.T) {
+	dir := ledger(t, "001_alpha.md", "002_beta.in-progress.md", "003_gamma.done.md")
+	tasks, _ := Load(dir)
+
+	alpha, _ := Find(tasks, "1")
+	alpha, err := alpha.Defer("maintainer's call: outward-facing publish", "2026-07-09")
+	if err != nil || alpha.File != "001_alpha.deferred.md" {
+		t.Fatalf("defer: %v %+v", err, alpha)
+	}
+	if alpha.Status != Pending || !alpha.Deferred {
+		t.Errorf("defer must keep status and set the flag: %+v", alpha)
+	}
+	if alpha.StatusLabel() != "deferred" {
+		t.Errorf("label = %q", alpha.StatusLabel())
+	}
+	body, err := os.ReadFile(alpha.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "## Deferred 2026-07-09") ||
+		!strings.Contains(string(body), "outward-facing publish") {
+		t.Errorf("reason not recorded:\n%s", body)
+	}
+	if _, err := alpha.Defer("again", "2026-07-10"); err == nil {
+		t.Error("re-deferring must error")
+	}
+	resumed, err := alpha.Resume("2026-07-10")
+	if err != nil || resumed.File != "001_alpha.md" || resumed.Deferred {
+		t.Fatalf("resume: %v %+v", err, resumed)
+	}
+	if body, _ := os.ReadFile(resumed.Path()); !strings.Contains(string(body), "## Resumed 2026-07-10") {
+		t.Errorf("resume not recorded:\n%s", body)
+	}
+	if _, err := resumed.Resume("2026-07-11"); err == nil {
+		t.Error("resuming an undeferred task must error")
+	}
+
+	// Deferral rides on in-progress, and resume restores it.
+	beta, _ := Find(tasks, "2")
+	beta, err = beta.Defer("blocked on upstream", "2026-07-09")
+	if err != nil || beta.File != "002_beta.in-progress.deferred.md" {
+		t.Fatalf("defer in-progress: %v %+v", err, beta)
+	}
+	if beta.StatusLabel() != "in-progress/deferred" {
+		t.Errorf("label = %q", beta.StatusLabel())
+	}
+	if beta, err = beta.Resume("2026-07-10"); err != nil || beta.File != "002_beta.in-progress.md" {
+		t.Fatalf("resume in-progress: %v %+v", err, beta)
+	}
+
+	// A done task has no pending decision to wait on.
+	gamma, _ := Find(tasks, "3")
+	if _, err := gamma.Defer("why", "2026-07-09"); err == nil {
+		t.Error("deferring a done task must error")
+	}
+
+	// Any lifecycle move clears the deferral.
+	held, err := beta.Defer("held again", "2026-07-11")
+	if err != nil {
+		t.Fatal(err)
+	}
+	started, err := held.SetStatus(InProgress)
+	if err != nil || started.File != "002_beta.in-progress.md" || started.Deferred {
+		t.Fatalf("start must clear deferral: %v %+v", err, started)
+	}
+}
+
+// TestDeferredNumberContest pins the reason deferral is a flag: it must not
+// influence which task keeps a contested number.
+func TestDeferredNumberContest(t *testing.T) {
+	dir := ledger(t, "005_first.deferred.md", "005_second.in-progress.md")
+	tasks, _ := Load(dir)
+	plan := PlanRepairs(tasks)
+	if len(plan) != 1 {
+		t.Fatalf("plan = %+v, want one move", plan)
+	}
+	if plan[0].T.Slug != "first" {
+		t.Errorf("in-progress must outrank deferred-pending for the number; moved %q", plan[0].T.Slug)
+	}
+	moved, err := plan[0].T.Renumber(plan[0].Num)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if moved.File != "001_first.deferred.md" {
+		t.Errorf("renumber must preserve the deferral marker: %q", moved.File)
 	}
 }
 
@@ -224,6 +344,34 @@ func TestCommands(t *testing.T) {
 	if err := run([]string{"list", "-all"}); err != nil {
 		t.Fatalf("list: %v", err)
 	}
+
+	// Deferral needs a reason, hides the task from the default list, and
+	// survives a round trip through resume.
+	if err := run([]string{"defer", "-no-commit", "3"}); err == nil {
+		t.Error("defer without -reason must error")
+	}
+	if err := run([]string{"defer", "-no-commit", "-reason", "waiting on the maintainer", "3"}); err != nil {
+		t.Fatalf("defer: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "003_try-the-cli.deferred.md")); err != nil {
+		t.Fatalf("deferred file: %v", err)
+	}
+	if out := capture(t, func() { _ = run([]string{"list"}) }); strings.Contains(out, "try-the-cli") {
+		t.Errorf("deferred task must not appear in the default list:\n%s", out)
+	} else if !strings.Contains(out, "1 deferred") {
+		t.Errorf("hidden deferrals must still be counted:\n%s", out)
+	}
+	if out := capture(t, func() { _ = run([]string{"list", "-all"}) }); !strings.Contains(out, "deferred") ||
+		!strings.Contains(out, "try-the-cli") {
+		t.Errorf("list -all must show the deferred task, marked:\n%s", out)
+	}
+	if err := run([]string{"resume", "-no-commit", "3"}); err != nil {
+		t.Fatalf("resume: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "003_try-the-cli.md")); err != nil {
+		t.Fatalf("resumed file: %v", err)
+	}
+
 	if err := run([]string{"bogus"}); err == nil {
 		t.Error("bogus command must error")
 	}
@@ -287,6 +435,8 @@ func FuzzSlugify(f *testing.F) {
 func FuzzParseName(f *testing.F) {
 	f.Add("001_first.md")
 	f.Add("qbd_ask.done.md")
+	f.Add("003_held.deferred.md")
+	f.Add("004_held.in-progress.deferred.md")
 	f.Add("_x.md")
 	f.Add("weird..md")
 	f.Fuzz(func(t *testing.T, name string) {
@@ -304,9 +454,10 @@ func FuzzParseName(f *testing.F) {
 			return
 		}
 		// A parsed task's reconstructed filename must parse identically.
-		round := task.Stem() + task.Status.suffix() + ".md"
+		round := task.Name()
 		task2, ok2 := parseName("tasks", round)
-		if !ok2 || task2.Stem() != task.Stem() || task2.Status != task.Status {
+		if !ok2 || task2.Stem() != task.Stem() || task2.Status != task.Status ||
+			task2.Deferred != task.Deferred {
 			t.Errorf("roundtrip %q -> %q -> %+v (%v)", name, round, task2, ok2)
 		}
 	})

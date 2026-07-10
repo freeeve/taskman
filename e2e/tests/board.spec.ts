@@ -29,6 +29,10 @@ test("places the seeded tasks in their status columns", async ({ page }) => {
   await expect(
     page.locator(`.column.in-progress .card[data-num="${inProgress.num}"]`)
   ).toBeVisible();
+  // The done column caps at 15 cards; the sandbox accumulates done tasks
+  // across runs, so reveal them all before asserting the seed is present.
+  const showAll = page.locator(".column.done .show-more");
+  if (await showAll.count()) await showAll.click();
   await expect(page.locator(`.column.done .card[data-num="${done.num}"]`)).toBeVisible();
 });
 

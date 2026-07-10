@@ -85,6 +85,48 @@ func TestNewFeatureDuplicate(t *testing.T) {
 	}
 }
 
+// TestShippedFeatureOwnsItsSlug pins the data-loss guard: a shipped feature
+// blocks re-creation of its slug, and SetDone never renames onto an
+// existing file.
+func TestShippedFeatureOwnsItsSlug(t *testing.T) {
+	projDir := t.TempDir()
+	f, err := NewFeature(projDir, "Deep ship", "2026-07-10")
+	if err != nil {
+		t.Fatal(err)
+	}
+	shipped, err := f.SetDone(true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, err := os.ReadFile(shipped.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Re-creating the same description is refused while the shipped file owns
+	// the slug.
+	if _, err := NewFeature(projDir, "Deep ship", "2026-07-10"); err == nil ||
+		err.Error() != `feature "deep-ship" already exists (shipped)` {
+		t.Errorf("recreate after ship = %v", err)
+	}
+
+	// Even with a same-slug pair forced onto disk, SetDone refuses to clobber.
+	dupe := Feature{Dir: FeaturesDir(projDir), File: "deep-ship.md", Slug: "deep-ship"}
+	if err := os.WriteFile(dupe.Path(), []byte("# Impostor\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := dupe.SetDone(true); err == nil {
+		t.Fatal("SetDone onto an existing target must refuse")
+	}
+	after, err := os.ReadFile(shipped.Path())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(after) != string(original) {
+		t.Error("shipped feature body was clobbered")
+	}
+}
+
 // FuzzParseTaskNums pins leniency: any Tasks: payload parses without panic
 // into unique positive numbers.
 func FuzzParseTaskNums(f *testing.F) {

@@ -248,7 +248,11 @@ func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
 		}
 		nf, err := f.SetDone(true)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
+			code := http.StatusInternalServerError
+			if strings.Contains(err.Error(), "refusing to overwrite") {
+				code = http.StatusConflict
+			}
+			writeErr(w, code, err)
 			return
 		}
 		s.commit(r.PathValue("p"), "feature done "+nf.Slug, f.Path(), nf.Path())

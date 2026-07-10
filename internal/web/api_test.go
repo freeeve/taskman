@@ -395,6 +395,14 @@ func TestAPIFeatureMutations(t *testing.T) {
 	if code := send(t, srv, "POST", "/api/projects/myproj/features/search-everything/done", nil, nil); code != 409 {
 		t.Errorf("re-done status %d", code)
 	}
+	// A shipped feature still owns its slug: re-creating it is refused, so
+	// the original spec can never be clobbered by a later ship.
+	if code := send(t, srv, "POST", "/api/projects/myproj/features",
+		map[string]string{"description": "Search everything"}, &dupErr); code != 409 {
+		t.Errorf("recreate-after-ship status %d", code)
+	} else if dupErr.Error != `feature "search-everything" already exists (shipped)` {
+		t.Errorf("recreate-after-ship error = %q", dupErr.Error)
+	}
 	if code := send(t, srv, "POST", "/api/projects/myproj/features/nope/done", nil, nil); code != 404 {
 		t.Errorf("missing feature status %d", code)
 	}

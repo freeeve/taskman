@@ -73,6 +73,12 @@ func NewFeature(projDir, desc, date string) (Feature, error) {
 		return Feature{}, err
 	}
 	f := Feature{Dir: dir, File: slug + ".md", Slug: slug, Title: desc}
+	// A shipped feature owns its slug too: without this guard a re-created
+	// feature would later SetDone onto slug.done.md and destroy the
+	// original's spec (os.Rename replaces silently).
+	if _, err := os.Stat(filepath.Join(dir, slug+".done.md")); err == nil {
+		return Feature{}, fmt.Errorf("feature %q already exists (shipped)", slug)
+	}
 	body := fmt.Sprintf("# %s\n\nTasks:\n\nOpened %s.\n", desc, date)
 	if err := task.Create(f.Path(), body); err != nil {
 		if os.IsExist(err) {
@@ -84,12 +90,17 @@ func NewFeature(projDir, desc, date string) (Feature, error) {
 }
 
 // SetDone renames the feature to its shipped (or, for false, active) form.
+// It refuses to rename onto an existing file: os.Rename replaces its
+// destination silently, and the destination here is another feature's spec.
 func (f Feature) SetDone(done bool) (Feature, error) {
 	nf := f
 	nf.Done = done
 	nf.File = nf.Slug + ".md"
 	if done {
 		nf.File = nf.Slug + ".done.md"
+	}
+	if _, err := os.Stat(nf.Path()); err == nil {
+		return f, fmt.Errorf("%s already exists; refusing to overwrite it", nf.File)
 	}
 	if err := os.Rename(f.Path(), nf.Path()); err != nil {
 		return f, err

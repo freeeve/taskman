@@ -44,6 +44,8 @@ func run(args []string) error {
 		return cmdDefer(rest)
 	case "resume":
 		return cmdResume(rest)
+	case "lane":
+		return cmdLane(rest)
 	case "adopt":
 		return cmdAdopt(rest)
 	case "file":
@@ -68,10 +70,15 @@ func usage() {
 	fmt.Fprint(os.Stderr, `taskman - central task ledger helper
 
 Usage:
-  taskman [list] [-all]        open tasks (-all includes done and deferred)
+  taskman [list] [-all] [-lane L]
+                               open tasks (-all includes done and deferred)
   taskman projects             store projects with open/deferred counts
   taskman next                 next free task number
-  taskman new <description>    create the next numbered pending task
+  taskman new [-lane L] <description>
+                               create the next numbered pending task; the lane
+                               token routes it to a session or submodule
+  taskman lane <n|slug> <lane|->
+                               set or clear a task's lane (rename)
   taskman start <n|slug>       mark in-progress
   taskman done <n|slug>        mark done
   taskman reopen <n|slug>      mark pending again

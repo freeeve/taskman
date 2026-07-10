@@ -58,6 +58,7 @@ func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	all := fs.Bool("all", false, "include done and deferred tasks")
 	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	lane := fs.String("lane", "", "only tasks in this lane")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -69,6 +70,9 @@ func cmdList(args []string) error {
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
 	shown, deferred := 0, 0
 	for _, t := range p.Tasks {
+		if *lane != "" && t.Lane != *lane {
+			continue
+		}
 		if t.Deferred && t.Status != task.Done {
 			deferred++
 		}
@@ -82,7 +86,7 @@ func cmdList(args []string) error {
 		} else if dups[t.Num] {
 			note = "DUPLICATE NUMBER (taskman fix)"
 		}
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", id, t.StatusLabel(), t.Slug, note)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", id, t.StatusLabel(), t.Lane, t.Slug, note)
 	}
 	if err := w.Flush(); err != nil {
 		return err

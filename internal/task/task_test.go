@@ -30,23 +30,30 @@ func TestParseName(t *testing.T) {
 		num      int
 		hasNum   bool
 		prefix   string
+		lane     string
 		slug     string
 		status   Status
 		deferred bool
 	}{
-		{"001_first-thing.md", true, 1, true, "", "first-thing", Pending, false},
-		{"012_loc-sru-ingest.in-progress.md", true, 12, true, "", "loc-sru-ingest", InProgress, false},
-		{"025_full-corpus.done.md", true, 25, true, "", "full-corpus", Done, false},
-		{"247_ghcr-publish.deferred.md", true, 247, true, "", "ghcr-publish", Pending, true},
-		{"031_paused.in-progress.deferred.md", true, 31, true, "", "paused", InProgress, true},
-		{"qbd_spotlight-noindex.md", true, 0, false, "qbd", "spotlight-noindex", Pending, false},
-		{"qbd_ask.done.md", true, 0, false, "qbd", "ask", Done, false},
-		{"qbd_ask.deferred.md", true, 0, false, "qbd", "ask", Pending, true},
-		{"README.md", false, 0, false, "", "", Pending, false},
-		{"notes.txt", false, 0, false, "", "", Pending, false},
-		{".hidden_thing.md", false, 0, false, "", "", Pending, false},
-		{"_leading-sep.md", false, 0, false, "", "", Pending, false},
-		{"trailing_.md", false, 0, false, "", "", Pending, false},
+		{"001_first-thing.md", true, 1, true, "", "", "first-thing", Pending, false},
+		{"012_loc-sru-ingest.in-progress.md", true, 12, true, "", "", "loc-sru-ingest", InProgress, false},
+		{"025_full-corpus.done.md", true, 25, true, "", "", "full-corpus", Done, false},
+		{"247_ghcr-publish.deferred.md", true, 247, true, "", "", "ghcr-publish", Pending, true},
+		{"031_paused.in-progress.deferred.md", true, 31, true, "", "", "paused", InProgress, true},
+		{"012-impl_fix-thing.md", true, 12, true, "", "impl", "fix-thing", Pending, false},
+		{"012-impl_fix-thing.in-progress.md", true, 12, true, "", "impl", "fix-thing", InProgress, false},
+		{"031-e2e_checkout-flow.in-progress.deferred.md", true, 31, true, "", "e2e", "checkout-flow", InProgress, true},
+		{"012-3_numeric-lane.md", true, 12, true, "", "3", "numeric-lane", Pending, false},
+		{"012-ui-web_dashed-lane.md", true, 12, true, "", "ui-web", "dashed-lane", Pending, false},
+		{"qbd_spotlight-noindex.md", true, 0, false, "qbd", "", "spotlight-noindex", Pending, false},
+		{"qbd-impl_prefixed-not-laned.md", true, 0, false, "qbd-impl", "", "prefixed-not-laned", Pending, false},
+		{"qbd_ask.done.md", true, 0, false, "qbd", "", "ask", Done, false},
+		{"qbd_ask.deferred.md", true, 0, false, "qbd", "", "ask", Pending, true},
+		{"README.md", false, 0, false, "", "", "", Pending, false},
+		{"notes.txt", false, 0, false, "", "", "", Pending, false},
+		{".hidden_thing.md", false, 0, false, "", "", "", Pending, false},
+		{"_leading-sep.md", false, 0, false, "", "", "", Pending, false},
+		{"trailing_.md", false, 0, false, "", "", "", Pending, false},
 	}
 	for _, c := range cases {
 		tk, ok := Parse("tasks", c.name)
@@ -58,12 +65,66 @@ func TestParseName(t *testing.T) {
 			continue
 		}
 		if tk.Num != c.num || tk.HasNum != c.hasNum || tk.Prefix != c.prefix ||
-			tk.Slug != c.slug || tk.Status != c.status || tk.Deferred != c.deferred {
+			tk.Lane != c.lane || tk.Slug != c.slug || tk.Status != c.status || tk.Deferred != c.deferred {
 			t.Errorf("Parse(%q) = %+v", c.name, tk)
 		}
 		if tk.Name() != c.name {
 			t.Errorf("Parse(%q).Name() = %q", c.name, tk.Name())
 		}
+	}
+}
+
+// TestLaneLifecycle pins the lane's free ride through every rename path:
+// status moves, deferral round trips, renumbering, and SetLane itself.
+func TestLaneLifecycle(t *testing.T) {
+	dir := ledger(t, "012-impl_fix-thing.md", "007_unrouted.md")
+	tasks, _ := Load(dir)
+
+	tk, err := Find(tasks, "12")
+	if err != nil || tk.Lane != "impl" {
+		t.Fatalf("Find(12) = %+v, %v", tk, err)
+	}
+	if tk, err = tk.SetStatus(InProgress); err != nil || tk.File != "012-impl_fix-thing.in-progress.md" {
+		t.Fatalf("start: %v %+v", err, tk)
+	}
+	if tk, err = tk.Defer("waiting", "2026-07-10"); err != nil || tk.File != "012-impl_fix-thing.in-progress.deferred.md" {
+		t.Fatalf("defer: %v %+v", err, tk)
+	}
+	if tk, err = tk.Resume("2026-07-10"); err != nil || tk.File != "012-impl_fix-thing.in-progress.md" {
+		t.Fatalf("resume: %v %+v", err, tk)
+	}
+	if tk, err = tk.SetStatus(Done); err != nil || tk.File != "012-impl_fix-thing.done.md" {
+		t.Fatalf("done: %v %+v", err, tk)
+	}
+	if tk, err = tk.Renumber(15); err != nil || tk.File != "015-impl_fix-thing.done.md" {
+		t.Fatalf("renumber: %v %+v", err, tk)
+	}
+	if tk.Lane != "impl" {
+		t.Errorf("lane lost along the lifecycle: %+v", tk)
+	}
+
+	// SetLane moves a task between lanes and clears with "".
+	tasks, _ = Load(dir)
+	un, _ := Find(tasks, "7")
+	un, err = un.SetLane("e2e")
+	if err != nil || un.File != "007-e2e_unrouted.md" {
+		t.Fatalf("SetLane: %v %+v", err, un)
+	}
+	if _, err := un.SetLane("e2e"); err == nil {
+		t.Error("same lane must error")
+	}
+	if un, err = un.SetLane(""); err != nil || un.File != "007_unrouted.md" {
+		t.Fatalf("clear lane: %v %+v", err, un)
+	}
+	ask := Task{Dir: dir, File: "qbd_x.md", Prefix: "qbd", Slug: "x"}
+	if _, err := ask.SetLane("impl"); err == nil {
+		t.Error("unadopted ask must refuse SetLane")
+	}
+
+	// Find narrows by lane fragment because the lane sits in the stem.
+	tasks, _ = Load(dir)
+	if tk, err := Find(tasks, "impl"); err != nil || tk.Num != 15 {
+		t.Errorf("Find(impl) = %+v, %v", tk, err)
 	}
 }
 
@@ -299,6 +360,9 @@ func FuzzParseName(f *testing.F) {
 	f.Add("qbd_ask.done.md")
 	f.Add("003_held.deferred.md")
 	f.Add("004_held.in-progress.deferred.md")
+	f.Add("012-impl_fix-thing.md")
+	f.Add("012-3_numeric-lane.in-progress.md")
+	f.Add("qbd-impl_prefixed.md")
 	f.Add("_x.md")
 	f.Add("weird..md")
 	f.Fuzz(func(t *testing.T, name string) {

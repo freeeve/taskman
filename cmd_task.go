@@ -15,12 +15,13 @@ func cmdNew(args []string) error {
 	fs := flag.NewFlagSet("new", flag.ContinueOnError)
 	noCommit := fs.Bool("no-commit", false, "skip the git commit")
 	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	lane := fs.String("lane", "", "routing token carried in the filename (012-impl_slug.md)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	desc := strings.TrimSpace(strings.Join(fs.Args(), " "))
 	if desc == "" {
-		return fmt.Errorf("usage: taskman new [-p project] [-no-commit] <description>")
+		return fmt.Errorf("usage: taskman new [-p project] [-lane lane] [-no-commit] <description>")
 	}
 	p, err := openProject(*project)
 	if err != nil {
@@ -31,13 +32,55 @@ func cmdNew(args []string) error {
 	if slug == "" {
 		return fmt.Errorf("description %q yields an empty slug", desc)
 	}
-	path := filepath.Join(p.Dir, fmt.Sprintf("%03d_%s.md", num, slug))
+	t := task.Task{Dir: p.Dir, Num: num, HasNum: true, Slug: slug, Lane: task.Slugify(*lane)}
+	if *lane != "" && t.Lane == "" {
+		return fmt.Errorf("lane %q yields an empty token", *lane)
+	}
+	t.File = t.Name()
 	body := fmt.Sprintf("# %03d -- %s\n\nOpened %s.\n", num, desc, time.Now().Format("2006-01-02"))
-	if err := task.Create(path, body); err != nil {
+	if err := task.Create(t.Path(), body); err != nil {
 		return err
 	}
-	fmt.Println(path)
-	p.commit(*noCommit, fmt.Sprintf("open %03d %s", num, slug), path)
+	fmt.Println(t.Path())
+	p.commit(*noCommit, fmt.Sprintf("open %s", t.Stem()), t.Path())
+	return nil
+}
+
+// cmdLane sets or clears ("-") a task's lane token and commits the rename.
+func cmdLane(args []string) error {
+	fs := flag.NewFlagSet("lane", flag.ContinueOnError)
+	noCommit := fs.Bool("no-commit", false, "skip the git commit")
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 2 {
+		return fmt.Errorf("usage: taskman lane [-p project] [-no-commit] <number|slug> <lane|->")
+	}
+	lane := fs.Arg(1)
+	if lane == "-" {
+		lane = ""
+	} else if lane = task.Slugify(lane); lane == "" {
+		return fmt.Errorf("lane %q yields an empty token", fs.Arg(1))
+	}
+	p, err := openProject(*project)
+	if err != nil {
+		return err
+	}
+	t, err := task.Find(p.Tasks, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	nt, err := t.SetLane(lane)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("%s -> %s\n", t.File, nt.File)
+	verb := "lane " + lane
+	if lane == "" {
+		verb = "clear lane"
+	}
+	p.commit(*noCommit, fmt.Sprintf("%s %s", verb, nt.Stem()), t.Path(), nt.Path())
 	return nil
 }
 

@@ -64,6 +64,24 @@ func (t Task) Resume(date string) (Task, error) {
 	return nt, nil
 }
 
+// SetLane renames the task to carry the given lane token, or to drop it when
+// lane is empty. Unadopted asks have no number to hang a lane on.
+func (t Task) SetLane(lane string) (Task, error) {
+	if !t.HasNum {
+		return t, fmt.Errorf("%s has no number; adopt it before assigning a lane", t.File)
+	}
+	if t.Lane == lane {
+		return t, fmt.Errorf("%s already has lane %q", t.File, lane)
+	}
+	nt := t
+	nt.Lane = lane
+	nt.File = nt.Name()
+	if err := os.Rename(t.Path(), nt.Path()); err != nil {
+		return t, err
+	}
+	return nt, nil
+}
+
 // Adopt renumbers an unadopted cross-repo ask into the ledger at num,
 // renaming the file and stamping the number into its H1 title (recording the
 // filed name in a follow-up line when the body doesn't already cite it).

@@ -170,6 +170,48 @@ func TestProjectFlagOverridesEnv(t *testing.T) {
 	}
 }
 
+// TestLanes drives lane routing through the CLI: new -lane, the list filter,
+// and the lane command's set/clear renames.
+func TestLanes(t *testing.T) {
+	_, dir := storeLedger(t, "laneproj", "001_shared.md")
+
+	if err := run([]string{"new", "-lane", "impl", "Wire the API"}); err != nil {
+		t.Fatalf("new -lane: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002-impl_wire-the-api.md")); err != nil {
+		t.Fatalf("laned file: %v", err)
+	}
+	if err := run([]string{"new", "-lane", "e2e", "Cover checkout"}); err != nil {
+		t.Fatalf("new -lane e2e: %v", err)
+	}
+
+	out := capture(t, func() { _ = run([]string{"list", "-lane", "impl"}) })
+	if !strings.Contains(out, "wire-the-api") || strings.Contains(out, "cover-checkout") ||
+		strings.Contains(out, "shared") {
+		t.Errorf("list -lane impl:\n%s", out)
+	}
+
+	// start keeps the lane; lane set/clear renames.
+	if err := run([]string{"start", "2"}); err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002-impl_wire-the-api.in-progress.md")); err != nil {
+		t.Fatalf("lane lost on start: %v", err)
+	}
+	if err := run([]string{"lane", "1", "e2e"}); err != nil {
+		t.Fatalf("lane set: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "001-e2e_shared.md")); err != nil {
+		t.Fatalf("lane rename: %v", err)
+	}
+	if err := run([]string{"lane", "1", "-"}); err != nil {
+		t.Fatalf("lane clear: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "001_shared.md")); err != nil {
+		t.Fatalf("lane clear rename: %v", err)
+	}
+}
+
 // TestCmdFix drives the fix command end to end: dry-run changes nothing,
 // the real run repairs duplicates and leaves singles alone.
 func TestCmdFix(t *testing.T) {
@@ -227,7 +269,7 @@ func TestAutoCommitPathspec(t *testing.T) {
 
 	log := git(t, home, "log", "--format=%s")
 	if !strings.Contains(log, "chore(alpha): start 001_first") ||
-		!strings.Contains(log, "chore(alpha): open 002 second-thing") {
+		!strings.Contains(log, "chore(alpha): open 002_second-thing") {
 		t.Errorf("log = %q", log)
 	}
 	// The rename is fully committed and the bystander is still only staged.

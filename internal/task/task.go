@@ -55,12 +55,17 @@ func (s Status) suffix() string {
 // "not being worked, and that is a decision", which is orthogonal to how far
 // along the work is. Keeping it off the Status axis means PlanRepairs never
 // has to answer the meaningless question of whether deferred outranks pending.
+// Lane is a free-form routing token between the number and the slug
+// (012-impl_fix-thing.md): which session, submodule, or workstream the task
+// belongs to. It lives in the filename so it survives every status rename
+// without any extra bookkeeping.
 type Task struct {
 	Dir      string // the tasks/ directory
 	File     string // current basename
 	Num      int
 	HasNum   bool
 	Prefix   string // filer prefix for unadopted cross-repo asks ("" when numbered)
+	Lane     string // optional routing token ("" when unrouted)
 	Slug     string
 	Status   Status
 	Deferred bool
@@ -69,12 +74,18 @@ type Task struct {
 // Path returns the task file's full path.
 func (t Task) Path() string { return filepath.Join(t.Dir, t.File) }
 
-// Stem returns the filename without status suffix and extension.
+// Stem returns the filename without status suffix and extension. The lane
+// rides inside the stem, which is why it survives every status rename,
+// deferral, and renumbering for free.
 func (t Task) Stem() string {
-	if t.HasNum {
+	switch {
+	case t.HasNum && t.Lane != "":
+		return fmt.Sprintf("%03d-%s_%s", t.Num, t.Lane, t.Slug)
+	case t.HasNum:
 		return fmt.Sprintf("%03d_%s", t.Num, t.Slug)
+	default:
+		return t.Prefix + "_" + t.Slug
 	}
-	return t.Prefix + "_" + t.Slug
 }
 
 // Name returns the basename the task's current state encodes: stem, status
@@ -105,8 +116,18 @@ func (t Task) StatusLabel() string {
 // ".deferred" marker (which follows the status, since it modifies it).
 var nameRE = regexp.MustCompile(`^(.+?)(?:\.(in-progress|done))?(\.deferred)?\.md$`)
 
+// headLaneRE splits a numbered head with a lane token: the number is the
+// maximal leading digit run, everything after the first "-" is the lane
+// (which may itself contain "-"). A head with no leading digits is a legacy
+// filer prefix, so "qbd-impl" stays a prefix rather than gaining a lane.
+var headLaneRE = regexp.MustCompile(`^(\d+)-(.+)$`)
+
 // Parse decodes a tasks/ basename; ok is false for non-task files
 // (README.md, dotfiles, files without a number-or-prefix separator).
+//
+// Grammar: stem[.in-progress|.done][.deferred].md, where stem is
+// NUM[-lane]_slug for numbered tasks (012-impl_fix-thing.md) or prefix_slug
+// for unadopted cross-repo asks.
 func Parse(dir, name string) (Task, bool) {
 	m := nameRE.FindStringSubmatch(name)
 	if m == nil || strings.HasPrefix(name, ".") {
@@ -127,6 +148,12 @@ func Parse(dir, name string) (Task, bool) {
 	head := stem[:i]
 	if n, err := strconv.Atoi(head); err == nil {
 		t.Num, t.HasNum = n, true
+	} else if m := headLaneRE.FindStringSubmatch(head); m != nil {
+		n, err := strconv.Atoi(m[1])
+		if err != nil {
+			return Task{}, false
+		}
+		t.Num, t.HasNum, t.Lane = n, true, m[2]
 	} else {
 		t.Prefix = head
 	}

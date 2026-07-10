@@ -313,6 +313,40 @@ func TestFeatures(t *testing.T) {
 	if err := run([]string{"feature", "bogus"}); err == nil {
 		t.Error("unknown feature subcommand must error")
 	}
+
+	// findFeature refuses to guess: ambiguous fragments and misses error.
+	if err := run([]string{"feature", "new", "Kanban mobile"}); err != nil {
+		t.Fatalf("second feature: %v", err)
+	}
+	if err := run([]string{"feature", "new", "Kanban tablet"}); err != nil {
+		t.Fatalf("third feature: %v", err)
+	}
+	if err := run([]string{"feature", "done", "kanban-"}); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("ambiguous feature fragment: %v", err)
+	}
+	if err := run([]string{"feature", "done", "nope"}); err == nil {
+		t.Error("missing feature must error")
+	}
+	// An exact slug wins even when it is a prefix of another slug.
+	if err := run([]string{"feature", "new", "Kanban"}); err != nil {
+		t.Fatalf("prefix feature: %v", err)
+	}
+	if err := run([]string{"feature", "done", "kanban"}); err != nil {
+		t.Errorf("exact slug must win over fragment matches: %v", err)
+	}
+}
+
+// TestServeArgs pins the serve command's guard rails without binding.
+func TestServeArgs(t *testing.T) {
+	storeLedger(t, "serveproj")
+	if err := run([]string{"serve", "extra-arg"}); err == nil {
+		t.Error("stray args must error")
+	}
+	if err := run([]string{"serve", "-addr", "0.0.0.0:0"}); err == nil ||
+		!strings.Contains(err.Error(), "insecure-bind") {
+		t.Errorf("public bind must be refused: %v", err)
+	}
 }
 
 // TestCmdFix drives the fix command end to end: dry-run changes nothing,

@@ -511,6 +511,66 @@ func TestScreenshots(t *testing.T) {
 	}
 }
 
+// TestAPIErrorPaths sweeps the mutation routes' failure branches: unknown
+// projects, malformed JSON, and state conflicts all answer with JSON errors
+// and the right status.
+func TestAPIErrorPaths(t *testing.T) {
+	_, srv := testStore(t)
+
+	// Unknown project 404s on every mutating route.
+	for _, c := range []struct{ method, path string }{
+		{"POST", "/api/projects/nope/tasks"},
+		{"POST", "/api/projects/nope/tasks/1/status"},
+		{"POST", "/api/projects/nope/tasks/1/defer"},
+		{"POST", "/api/projects/nope/tasks/1/resume"},
+		{"PUT", "/api/projects/nope/order"},
+		{"POST", "/api/projects/nope/features"},
+		{"POST", "/api/projects/nope/features/x/done"},
+	} {
+		if code := send(t, srv, c.method, c.path, map[string]string{}, nil); code != 404 {
+			t.Errorf("%s %s = %d, want 404", c.method, c.path, code)
+		}
+	}
+
+	// Malformed JSON bodies 400.
+	for _, path := range []string{
+		"/api/projects/myproj/tasks",
+		"/api/projects/myproj/tasks/2/status",
+		"/api/projects/myproj/tasks/2/defer",
+		"/api/projects/myproj/order",
+	} {
+		method := "POST"
+		if strings.HasSuffix(path, "order") {
+			method = "PUT"
+		}
+		req, err := http.NewRequest(method, srv.URL+path, strings.NewReader("{not json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		res, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 400 {
+			t.Errorf("%s %s with garbage = %d, want 400", method, path, res.StatusCode)
+		}
+	}
+
+	// State conflicts 409: resuming an undeferred task, deferring a done one.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/resume", nil, nil); code != 409 {
+		t.Errorf("resume undeferred = %d, want 409", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/1/defer",
+		map[string]string{"reason": "why"}, nil); code != 409 {
+		t.Errorf("defer done task = %d, want 409", code)
+	}
+	// Resume of a deferred task via slug key works (Find accepts fragments).
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/held/resume", nil, nil); code != 200 {
+		t.Errorf("resume by slug = %d", code)
+	}
+}
+
 func TestStaticAndIndex(t *testing.T) {
 	_, srv := testStore(t)
 	for _, path := range []string{"/", "/static/app.css", "/static/board.js", "/static/features.js"} {

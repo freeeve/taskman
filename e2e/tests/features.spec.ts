@@ -2,7 +2,10 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   BASE_URL,
   PROJECT,
+  TINY_PNG,
   appendFeatureBody,
+  createTaskViaAPI,
+  finishTask,
   gotoBoard,
   storeIsLocal,
   uniqueDesc,
@@ -160,14 +163,33 @@ test("a feature body's screenshot link is rewritten through /shots/ like task de
   request,
 }) => {
   test.skip(!storeIsLocal(), "store is not local to the test runner");
+  // Upload a real screenshot to a task so the link the feature embeds points
+  // at a file that actually exists -- the feature then renders a live image,
+  // not a dangling reference that 404s on every later features-view render
+  // (features cannot be deleted, so debris would accumulate in the sandbox).
+  const t = await createTaskViaAPI(request, uniqueDesc("feature-shotlink-task"));
+  const upload = await request.post(`${base}/tasks/${t.num}/screenshots`, {
+    multipart: { file: { name: "s.png", mimeType: "image/png", buffer: TINY_PNG } },
+  });
+  expect(upload.status()).toBe(201);
+  const { path: shotPath } = await upload.json(); // screenshots/NNN/<name>
+
   const desc = uniqueDesc("feature-shotlink");
   const created = await request.post(`${base}/features`, { data: { description: desc } });
   expect(created.status()).toBe(201);
   const { slug } = await created.json();
-  appendFeatureBody(slug, "\n![diag](../screenshots/128/x.png)\n");
+  appendFeatureBody(slug, `\n![diag](../${shotPath})\n`);
 
   const feats = await (await request.get(`${base}/features`)).json();
   const html: string = feats.find((f: { slug: string }) => f.slug === slug).html;
-  expect(html).toContain(`src="/shots/${PROJECT}/128/x.png"`);
+  const served = `/shots/${PROJECT}/${shotPath.replace(/^screenshots\//, "")}`;
+  expect(html).toContain(`src="${served}"`);
   expect(html).not.toContain(`src="../screenshots/`);
+
+  // The rewritten link resolves -- the embedded image genuinely loads.
+  const img = await request.get(`${BASE_URL}${served}`);
+  expect(img.ok()).toBeTruthy();
+  expect(img.headers()["content-type"]).toContain("image/png");
+
+  await finishTask(request, t.num);
 });

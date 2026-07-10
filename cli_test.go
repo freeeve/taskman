@@ -249,6 +249,94 @@ func TestAutoCommitPathspec(t *testing.T) {
 	}
 }
 
+// srcRepo builds a git repo with a committed tasks/ ledger, mimicking a
+// pre-cutover repo about to migrate.
+func srcRepo(t *testing.T, dirname string, names ...string) string {
+	t.Helper()
+	repo := filepath.Join(t.TempDir(), dirname)
+	dir := filepath.Join(repo, "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	for _, n := range names {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("# "+n+"\nBody.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, args := range [][]string{
+		{"init", "-q", "-b", "main"},
+		{"add", "-A"},
+		{"commit", "-q", "-m", "seed"},
+	} {
+		git(t, repo, args...)
+	}
+	return repo
+}
+
+// TestMigrate pins the import contract: byte-identical copies into an empty
+// project only, an order file seeded with open numbers, non-task files
+// skipped, one store commit, and -prune removing the source ledger with a
+// pointer commit in its repo.
+func TestMigrate(t *testing.T) {
+	home, _ := storeLedger(t, "unrelated")
+	repo := srcRepo(t, "My Old Repo",
+		"001_alpha.done.md", "002_beta.md", "003_gamma.in-progress.md",
+		"004_held.deferred.md", "qbd_legacy-ask.md")
+	if err := os.WriteFile(filepath.Join(repo, "tasks", "README.md"), []byte("notes\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := run([]string{"migrate", repo}); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	dest := filepath.Join(home, "my-old-repo", "tasks")
+	for _, n := range []string{"001_alpha.done.md", "002_beta.md", "003_gamma.in-progress.md",
+		"004_held.deferred.md", "qbd_legacy-ask.md"} {
+		want, _ := os.ReadFile(filepath.Join(repo, "tasks", n))
+		got, err := os.ReadFile(filepath.Join(dest, n))
+		if err != nil || string(got) != string(want) {
+			t.Errorf("%s not copied byte-for-byte: %v", n, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(dest, "README.md")); err == nil {
+		t.Error("non-task file must be skipped")
+	}
+	order, err := os.ReadFile(filepath.Join(home, "my-old-repo", "order"))
+	if err != nil {
+		t.Fatalf("order file: %v", err)
+	}
+	if s := string(order); !strings.Contains(s, "002\n003\n004\n") || strings.Contains(s, "001") {
+		t.Errorf("order must list open numbers ascending:\n%s", s)
+	}
+	if log := git(t, home, "log", "-1", "--format=%s"); !strings.Contains(log, "chore(my-old-repo): migrate 5 tasks") {
+		t.Errorf("store commit = %q", log)
+	}
+	// The source ledger is untouched without -prune.
+	if _, err := os.Stat(filepath.Join(repo, "tasks", "002_beta.md")); err != nil {
+		t.Error("source ledger must be left in place without -prune")
+	}
+
+	// A non-empty destination is refused.
+	if err := run([]string{"migrate", repo}); err == nil {
+		t.Error("migrating onto a non-empty project must error")
+	}
+
+	// -prune removes the source ledger and commits the pointer.
+	repo2 := srcRepo(t, "prunerepo", "001_only.md")
+	if err := run([]string{"migrate", "-prune", repo2, "pruned"}); err != nil {
+		t.Fatalf("migrate -prune: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(repo2, "tasks")); err == nil {
+		t.Error("-prune must remove the source tasks/")
+	}
+	if log := git(t, repo2, "log", "-1", "--format=%s"); !strings.Contains(log, "ledger moved to central taskman store") {
+		t.Errorf("source pointer commit = %q", log)
+	}
+	if _, err := os.Stat(filepath.Join(home, "pruned", "tasks", "001_only.md")); err != nil {
+		t.Errorf("explicit project name not honored: %v", err)
+	}
+}
+
 // TestFixCommits pins the fix command's single pathspec commit.
 func TestFixCommits(t *testing.T) {
 	home, _ := storeLedger(t, "fixproj", "001_one.md", "003_a.md", "003_b.done.md")

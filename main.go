@@ -52,6 +52,8 @@ func run(args []string) error {
 		return cmdFix(rest)
 	case "projects":
 		return cmdProjects(rest)
+	case "migrate":
+		return cmdMigrate(rest)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -83,6 +85,10 @@ Usage:
                                its next number, committed immediately
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
+  taskman migrate [-prune] <repo-dir> [project]
+                               import a repo-local tasks/ ledger into the
+                               store (empty project only); -prune removes the
+                               source ledger and commits that in its repo
 
 Ledgers live in the central store ($TASKMAN_HOME, default ~/.taskman), one
 directory per project. The project is resolved from -p, TASKMAN_PROJECT, the

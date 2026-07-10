@@ -3,13 +3,106 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
 	"github.com/freeeve/taskman/internal/store"
 	"github.com/freeeve/taskman/internal/task"
 )
+
+// cmdMigrate imports a repo-local tasks/ ledger into the central store,
+// byte-for-byte and only into an empty project (a merge story is deliberately
+// out of scope). Open task numbers seed the project's order file as a
+// no-opinion-yet priority baseline. -prune removes the source ledger and
+// commits a pointer in its repo.
+func cmdMigrate(args []string) error {
+	fs := flag.NewFlagSet("migrate", flag.ContinueOnError)
+	prune := fs.Bool("prune", false, "remove the source tasks/ and commit the removal in the source repo")
+	noCommit := fs.Bool("no-commit", false, "skip the git commits")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() < 1 || fs.NArg() > 2 {
+		return fmt.Errorf("usage: taskman migrate [-prune] [-no-commit] <repo-dir> [project]")
+	}
+	repo := fs.Arg(0)
+	src := filepath.Join(repo, "tasks")
+	if fi, err := os.Stat(src); err != nil || !fi.IsDir() {
+		return fmt.Errorf("%s has no tasks/ directory", repo)
+	}
+	name := fs.Arg(1)
+	if name == "" {
+		abs, err := filepath.Abs(repo)
+		if err != nil {
+			return err
+		}
+		name = filepath.Base(abs)
+	}
+	p, err := openProject(name)
+	if err != nil {
+		return err
+	}
+	if len(p.Tasks) > 0 {
+		return fmt.Errorf("project %s already has %d tasks; migrate only fills empty ledgers", p.Name, len(p.Tasks))
+	}
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+	copied := 0
+	var open []int
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		t, ok := task.Parse(src, e.Name())
+		if !ok {
+			fmt.Printf("skipped (not a task file): %s\n", e.Name())
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(src, e.Name()))
+		if err != nil {
+			return err
+		}
+		if err := task.Create(filepath.Join(p.Dir, e.Name()), string(data)); err != nil {
+			return err
+		}
+		copied++
+		if t.HasNum && t.Status != task.Done {
+			open = append(open, t.Num)
+		}
+	}
+	if copied == 0 {
+		return fmt.Errorf("no task files found in %s", src)
+	}
+	orderPath := filepath.Join(filepath.Dir(p.Dir), "order")
+	if len(open) > 0 {
+		sort.Ints(open)
+		var b strings.Builder
+		b.WriteString("# priority order, top = next up; rewritten by taskman\n")
+		for _, n := range open {
+			fmt.Fprintf(&b, "%03d\n", n)
+		}
+		if err := os.WriteFile(orderPath, []byte(b.String()), 0o644); err != nil {
+			return err
+		}
+	}
+	fmt.Printf("migrated %d tasks from %s to %s\n", copied, src, p.Dir)
+	p.commit(*noCommit, fmt.Sprintf("migrate %d tasks from %s", copied, repo), p.Dir, orderPath)
+	if !*prune {
+		fmt.Printf("source ledger left in place; remove it with:\n  taskman migrate -prune, or\n  git -C %s rm -r tasks && git -C %s commit -m 'chore(tasks): ledger moved to taskman store'\n", repo, repo)
+		return nil
+	}
+	if err := os.RemoveAll(src); err != nil {
+		return err
+	}
+	store.AutoCommit(*noCommit, repo,
+		fmt.Sprintf("chore(tasks): ledger moved to central taskman store (project %s)", p.Name), src)
+	return nil
+}
 
 // cmdFile writes a cross-repo ask into another store project's tasks/ at
 // that ledger's next free number and commits it -- the immediate pathspec

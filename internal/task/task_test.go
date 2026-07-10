@@ -1,7 +1,6 @@
-package main
+package task
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,27 +21,6 @@ func ledger(t *testing.T, names ...string) string {
 		}
 	}
 	return dir
-}
-
-// capture runs fn with os.Stdout redirected and returns what it printed.
-func capture(t *testing.T, fn func()) string {
-	t.Helper()
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatal(err)
-	}
-	saved := os.Stdout
-	os.Stdout = w
-	fn()
-	os.Stdout = saved
-	if err := w.Close(); err != nil {
-		t.Fatal(err)
-	}
-	out, err := io.ReadAll(r)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return string(out)
 }
 
 func TestParseName(t *testing.T) {
@@ -71,20 +49,20 @@ func TestParseName(t *testing.T) {
 		{"trailing_.md", false, 0, false, "", "", Pending, false},
 	}
 	for _, c := range cases {
-		task, ok := parseName("tasks", c.name)
+		tk, ok := Parse("tasks", c.name)
 		if ok != c.ok {
-			t.Errorf("parseName(%q) ok = %v, want %v", c.name, ok, c.ok)
+			t.Errorf("Parse(%q) ok = %v, want %v", c.name, ok, c.ok)
 			continue
 		}
 		if !ok {
 			continue
 		}
-		if task.Num != c.num || task.HasNum != c.hasNum || task.Prefix != c.prefix ||
-			task.Slug != c.slug || task.Status != c.status || task.Deferred != c.deferred {
-			t.Errorf("parseName(%q) = %+v", c.name, task)
+		if tk.Num != c.num || tk.HasNum != c.hasNum || tk.Prefix != c.prefix ||
+			tk.Slug != c.slug || tk.Status != c.status || tk.Deferred != c.deferred {
+			t.Errorf("Parse(%q) = %+v", c.name, tk)
 		}
-		if task.Name() != c.name {
-			t.Errorf("parseName(%q).Name() = %q", c.name, task.Name())
+		if tk.Name() != c.name {
+			t.Errorf("Parse(%q).Name() = %q", c.name, tk.Name())
 		}
 	}
 }
@@ -189,8 +167,8 @@ func TestLoadOrderAndDups(t *testing.T) {
 		t.Fatal(err)
 	}
 	var stems []string
-	for _, task := range tasks {
-		stems = append(stems, task.Stem())
+	for _, tk := range tasks {
+		stems = append(stems, tk.Stem())
 	}
 	want := []string{"001_one", "002_two", "012_first-twelve", "012_second-twelve", "qbd_ask"}
 	if strings.Join(stems, " ") != strings.Join(want, " ") {
@@ -225,43 +203,43 @@ func TestFindTasksDirWalksUp(t *testing.T) {
 func TestFind(t *testing.T) {
 	dir := ledger(t, "001_alpha.md", "012_beta.md", "012_gamma.md", "qbd_ask.md")
 	tasks, _ := Load(dir)
-	if task, err := Find(tasks, "1"); err != nil || task.Slug != "alpha" {
-		t.Errorf("Find(1) = %+v, %v", task, err)
+	if tk, err := Find(tasks, "1"); err != nil || tk.Slug != "alpha" {
+		t.Errorf("Find(1) = %+v, %v", tk, err)
 	}
 	if _, err := Find(tasks, "12"); err == nil || !strings.Contains(err.Error(), "ambiguous") {
 		t.Errorf("Find(12) must be ambiguous: %v", err)
 	}
-	if task, err := Find(tasks, "gam"); err != nil || task.Slug != "gamma" {
-		t.Errorf("Find(gam) = %+v, %v", task, err)
+	if tk, err := Find(tasks, "gam"); err != nil || tk.Slug != "gamma" {
+		t.Errorf("Find(gam) = %+v, %v", tk, err)
 	}
 	if _, err := Find(tasks, "nope"); err == nil {
 		t.Error("Find(nope) must fail")
 	}
-	if task, err := Find(tasks, "qbd_ask"); err != nil || task.Prefix != "qbd" {
-		t.Errorf("Find(qbd_ask) = %+v, %v", task, err)
+	if tk, err := Find(tasks, "qbd_ask"); err != nil || tk.Prefix != "qbd" {
+		t.Errorf("Find(qbd_ask) = %+v, %v", tk, err)
 	}
 }
 
 func TestSetStatusLifecycle(t *testing.T) {
 	dir := ledger(t, "001_alpha.md")
 	tasks, _ := Load(dir)
-	task := tasks[0]
-	task, err := task.SetStatus(InProgress)
-	if err != nil || task.File != "001_alpha.in-progress.md" {
-		t.Fatalf("start: %v %+v", err, task)
+	tk := tasks[0]
+	tk, err := tk.SetStatus(InProgress)
+	if err != nil || tk.File != "001_alpha.in-progress.md" {
+		t.Fatalf("start: %v %+v", err, tk)
 	}
-	task, err = task.SetStatus(Done)
-	if err != nil || task.File != "001_alpha.done.md" {
-		t.Fatalf("done: %v %+v", err, task)
+	tk, err = tk.SetStatus(Done)
+	if err != nil || tk.File != "001_alpha.done.md" {
+		t.Fatalf("done: %v %+v", err, tk)
 	}
-	if _, err := task.SetStatus(Done); err == nil {
+	if _, err := tk.SetStatus(Done); err == nil {
 		t.Error("re-done must error")
 	}
-	task, err = task.SetStatus(Pending)
-	if err != nil || task.File != "001_alpha.md" {
-		t.Fatalf("reopen: %v %+v", err, task)
+	tk, err = tk.SetStatus(Pending)
+	if err != nil || tk.File != "001_alpha.md" {
+		t.Fatalf("reopen: %v %+v", err, tk)
 	}
-	if _, err := os.Stat(task.Path()); err != nil {
+	if _, err := os.Stat(tk.Path()); err != nil {
 		t.Errorf("final file missing: %v", err)
 	}
 }
@@ -317,104 +295,6 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-// TestCommands drives the CLI surface end to end in a temp ledger.
-func TestCommands(t *testing.T) {
-	dir := ledger(t, "001_alpha.done.md", "002_beta.md")
-	repo := filepath.Dir(dir)
-	t.Chdir(repo)
-
-	if err := run([]string{"new", "Try the CLI"}); err != nil {
-		t.Fatalf("new: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "003_try-the-cli.md")); err != nil {
-		t.Fatalf("new file: %v", err)
-	}
-	if err := run([]string{"start", "3"}); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-	if err := run([]string{"done", "3"}); err != nil {
-		t.Fatalf("done: %v", err)
-	}
-	if err := run([]string{"reopen", "3"}); err != nil {
-		t.Fatalf("reopen: %v", err)
-	}
-	if err := run([]string{"next"}); err != nil {
-		t.Fatalf("next: %v", err)
-	}
-	if err := run([]string{"list", "-all"}); err != nil {
-		t.Fatalf("list: %v", err)
-	}
-
-	// Deferral needs a reason, hides the task from the default list, and
-	// survives a round trip through resume.
-	if err := run([]string{"defer", "-no-commit", "3"}); err == nil {
-		t.Error("defer without -reason must error")
-	}
-	if err := run([]string{"defer", "-no-commit", "-reason", "waiting on the maintainer", "3"}); err != nil {
-		t.Fatalf("defer: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "003_try-the-cli.deferred.md")); err != nil {
-		t.Fatalf("deferred file: %v", err)
-	}
-	if out := capture(t, func() { _ = run([]string{"list"}) }); strings.Contains(out, "try-the-cli") {
-		t.Errorf("deferred task must not appear in the default list:\n%s", out)
-	} else if !strings.Contains(out, "1 deferred") {
-		t.Errorf("hidden deferrals must still be counted:\n%s", out)
-	}
-	if out := capture(t, func() { _ = run([]string{"list", "-all"}) }); !strings.Contains(out, "deferred") ||
-		!strings.Contains(out, "try-the-cli") {
-		t.Errorf("list -all must show the deferred task, marked:\n%s", out)
-	}
-	if err := run([]string{"resume", "-no-commit", "3"}); err != nil {
-		t.Fatalf("resume: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(dir, "003_try-the-cli.md")); err != nil {
-		t.Fatalf("resumed file: %v", err)
-	}
-
-	if err := run([]string{"bogus"}); err == nil {
-		t.Error("bogus command must error")
-	}
-
-	// File an ask into a second repo: it lands at THAT ledger's next number
-	// (the immediate commit makes the claim safe), body crediting the filer.
-	other := filepath.Join(t.TempDir(), "otherrepo")
-	otherTasks := filepath.Join(other, "tasks")
-	if err := os.MkdirAll(otherTasks, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(otherTasks, "004_existing.md"), []byte("# x\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := run([]string{"file", other, "Please fix the flux capacitor"}); err != nil {
-		t.Fatalf("file: %v", err)
-	}
-	ask := filepath.Join(otherTasks, "005_please-fix-the-flux-capacitor.md")
-	data, err := os.ReadFile(ask)
-	if err != nil {
-		t.Fatalf("filed ask: %v", err)
-	}
-	if !strings.HasPrefix(string(data), "# 005 -- Please fix the flux capacitor\n") ||
-		!strings.Contains(string(data), "Filed from myrepo") {
-		t.Errorf("ask body:\n%s", data)
-	}
-	if err := run([]string{"file", other, "Please fix the flux capacitor"}); err == nil {
-		t.Error("re-filing the same ask must refuse to overwrite")
-	}
-	// Legacy prefixed asks still adopt.
-	legacy := filepath.Join(otherTasks, "qbd_old-style-ask.md")
-	if err := os.WriteFile(legacy, []byte("# Old style ask\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	t.Chdir(other)
-	if err := run([]string{"adopt", "qbd_old-style-ask"}); err != nil {
-		t.Fatalf("adopt: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(otherTasks, "006_old-style-ask.md")); err != nil {
-		t.Fatalf("adopted file: %v", err)
-	}
-}
-
 func FuzzSlugify(f *testing.F) {
 	f.Add("Full-corpus NQ export!")
 	f.Add("---")
@@ -440,25 +320,25 @@ func FuzzParseName(f *testing.F) {
 	f.Add("_x.md")
 	f.Add("weird..md")
 	f.Fuzz(func(t *testing.T, name string) {
-		task, ok := parseName("tasks", name)
+		tk, ok := Parse("tasks", name)
 		if !ok {
 			return
 		}
-		if task.Slug == "" {
-			t.Errorf("parseName(%q) accepted an empty slug", name)
+		if tk.Slug == "" {
+			t.Errorf("Parse(%q) accepted an empty slug", name)
 		}
-		if !task.HasNum && task.Prefix == "" {
-			t.Errorf("parseName(%q) accepted neither number nor prefix", name)
+		if !tk.HasNum && tk.Prefix == "" {
+			t.Errorf("Parse(%q) accepted neither number nor prefix", name)
 		}
 		if !utf8.ValidString(name) {
 			return
 		}
 		// A parsed task's reconstructed filename must parse identically.
-		round := task.Name()
-		task2, ok2 := parseName("tasks", round)
-		if !ok2 || task2.Stem() != task.Stem() || task2.Status != task.Status ||
-			task2.Deferred != task.Deferred {
-			t.Errorf("roundtrip %q -> %q -> %+v (%v)", name, round, task2, ok2)
+		round := tk.Name()
+		tk2, ok2 := Parse("tasks", round)
+		if !ok2 || tk2.Stem() != tk.Stem() || tk2.Status != tk.Status ||
+			tk2.Deferred != tk.Deferred {
+			t.Errorf("roundtrip %q -> %q -> %+v (%v)", name, round, tk2, ok2)
 		}
 	})
 }

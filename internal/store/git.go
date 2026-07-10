@@ -1,4 +1,6 @@
-package main
+// Package store owns where ledgers live and how their mutations are
+// persisted: git plumbing today, the central taskman store as it grows.
+package store
 
 import (
 	"fmt"
@@ -19,10 +21,10 @@ func gitTracked(dir, path string) bool {
 	return exec.Command("git", "-C", dir, "ls-files", "--error-unmatch", "--", path).Run() == nil
 }
 
-// gitCommit stages exactly the given paths and commits them with a pathspec,
+// Commit stages exactly the given paths and commits them with a pathspec,
 // so a concurrent session's staged work in the same repo is never swept into
 // the commit. Paths that neither exist nor are tracked are skipped.
-func gitCommit(dir, msg string, paths []string) error {
+func Commit(dir, msg string, paths []string) error {
 	if !gitDir(dir) {
 		return fmt.Errorf("%s is not in a git repository", dir)
 	}
@@ -46,13 +48,13 @@ func gitCommit(dir, msg string, paths []string) error {
 	return nil
 }
 
-// autoCommit commits task-file paths unless disabled, downgrading git
+// AutoCommit commits task-file paths unless disabled, downgrading git
 // problems to a warning so the ledger operation itself still succeeds.
-func autoCommit(noCommit bool, dir, msg string, paths ...string) {
+func AutoCommit(noCommit bool, dir, msg string, paths ...string) {
 	if noCommit {
 		return
 	}
-	if err := gitCommit(dir, msg, paths); err != nil {
+	if err := Commit(dir, msg, paths); err != nil {
 		fmt.Fprintf(os.Stderr, "taskman: not committed (%v)\n", err)
 		return
 	}

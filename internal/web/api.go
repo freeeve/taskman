@@ -203,13 +203,16 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Task bodies link screenshots relative to tasks/ (../screenshots/...);
-	// in the browser those resolve through the /shots/ route instead.
-	rendered := strings.ReplaceAll(html.String(),
-		`src="../screenshots/`, `src="/shots/`+r.PathValue("p")+`/`)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"task": toJSON(t), "body": string(body), "html": rendered,
+		"task": toJSON(t), "body": string(body), "html": rewriteShots(html.String(), r.PathValue("p")),
 	})
+}
+
+// rewriteShots redirects store-relative screenshot links through the
+// /shots/ route: bodies link images relative to their directory
+// (../screenshots/NNN/f.png), which no browser route serves directly.
+func rewriteShots(html, project string) string {
+	return strings.ReplaceAll(html, `src="../screenshots/`, `src="/shots/`+project+`/`)
 }
 
 // features returns the project's features with per-linked-task status chips.
@@ -252,7 +255,7 @@ func (s *server) features(w http.ResponseWriter, r *http.Request) {
 		if body, err := os.ReadFile(f.Path()); err == nil {
 			var html bytes.Buffer
 			if err := markdown.Convert(body, &html); err == nil {
-				fj.HTML = html.String()
+				fj.HTML = rewriteShots(html.String(), r.PathValue("p"))
 			}
 		}
 		for _, n := range f.Tasks {

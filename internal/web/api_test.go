@@ -43,7 +43,7 @@ func testStore(t *testing.T) (string, *httptest.Server) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(fdir, "kanban.md"),
-		[]byte("# Kanban\n\nTasks: 001, 002, 099\n"), 0o644); err != nil {
+		[]byte("# Kanban\n\nTasks: 001, 002, 099\n\n![diag](../screenshots/002/x.png)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_AUTHOR_NAME", "Test")
@@ -226,6 +226,12 @@ func TestAPIFeatures(t *testing.T) {
 	if len(chips) != 3 || chips[0].Status != "done" || chips[1].Status != "pending" ||
 		chips[2].Status != "missing" {
 		t.Errorf("chips = %+v", chips)
+	}
+	// Screenshot links in feature bodies route through /shots/ exactly like
+	// task bodies.
+	if !strings.Contains(feats[0].HTML, `src="/shots/myproj/002/x.png"`) ||
+		strings.Contains(feats[0].HTML, "../screenshots/") {
+		t.Errorf("feature img src not rewritten: %q", feats[0].HTML)
 	}
 }
 

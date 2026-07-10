@@ -69,6 +69,22 @@ func TestLoadFeatures(t *testing.T) {
 	}
 }
 
+// TestNewFeatureDuplicate pins the clean conflict error: no OS error text,
+// no absolute store path.
+func TestNewFeatureDuplicate(t *testing.T) {
+	projDir := t.TempDir()
+	if _, err := NewFeature(projDir, "Search everything", "2026-07-10"); err != nil {
+		t.Fatal(err)
+	}
+	_, err := NewFeature(projDir, "Search everything", "2026-07-10")
+	if err == nil {
+		t.Fatal("duplicate must error")
+	}
+	if err.Error() != `feature "search-everything" already exists` {
+		t.Errorf("error = %q (must not leak the path)", err)
+	}
+}
+
 // FuzzParseTaskNums pins leniency: any Tasks: payload parses without panic
 // into unique positive numbers.
 func FuzzParseTaskNums(f *testing.F) {

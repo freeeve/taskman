@@ -75,6 +75,9 @@ func NewFeature(projDir, desc, date string) (Feature, error) {
 	f := Feature{Dir: dir, File: slug + ".md", Slug: slug, Title: desc}
 	body := fmt.Sprintf("# %s\n\nTasks:\n\nOpened %s.\n", desc, date)
 	if err := task.Create(f.Path(), body); err != nil {
+		if os.IsExist(err) {
+			return Feature{}, fmt.Errorf("feature %q already exists", slug)
+		}
 		return Feature{}, err
 	}
 	return f, nil

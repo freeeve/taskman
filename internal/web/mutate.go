@@ -205,7 +205,7 @@ func (s *server) createFeature(w http.ResponseWriter, r *http.Request) {
 	f, err := store.NewFeature(projDir, strings.TrimSpace(req.Description), today())
 	if err != nil {
 		code := http.StatusBadRequest
-		if strings.Contains(err.Error(), "file exists") {
+		if strings.Contains(err.Error(), "already exists") {
 			code = http.StatusConflict
 		}
 		writeErr(w, code, err)

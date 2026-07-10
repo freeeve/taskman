@@ -367,9 +367,16 @@ func TestAPIFeatureMutations(t *testing.T) {
 	if s := lastSubject(t, home); s != "chore(myproj): feature search-everything" {
 		t.Errorf("create commit = %q", s)
 	}
+	var dupErr struct {
+		Error string `json:"error"`
+	}
 	if code := send(t, srv, "POST", "/api/projects/myproj/features",
-		map[string]string{"description": "Search everything"}, nil); code != 409 {
+		map[string]string{"description": "Search everything"}, &dupErr); code != 409 {
 		t.Errorf("duplicate feature status %d", code)
+	}
+	// The message names the feature, not the OS error or the store path.
+	if dupErr.Error != `feature "search-everything" already exists` {
+		t.Errorf("duplicate feature error = %q (must not leak paths)", dupErr.Error)
 	}
 	if code := send(t, srv, "POST", "/api/projects/myproj/features",
 		map[string]string{"description": "!!!"}, nil); code != 400 {

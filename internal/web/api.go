@@ -203,8 +203,12 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	// Task bodies link screenshots relative to tasks/ (../screenshots/...);
+	// in the browser those resolve through the /shots/ route instead.
+	rendered := strings.ReplaceAll(html.String(),
+		`src="../screenshots/`, `src="/shots/`+r.PathValue("p")+`/`)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"task": toJSON(t), "body": string(body), "html": html.String(),
+		"task": toJSON(t), "body": string(body), "html": rendered,
 	})
 }
 

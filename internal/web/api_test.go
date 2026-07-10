@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -340,6 +341,124 @@ func TestAPIMutations(t *testing.T) {
 	}
 	if data.Tasks[0].Num != 5 || data.Tasks[1].Num != 3 {
 		t.Errorf("tasks after reorder = %+v", data.Tasks)
+	}
+}
+
+// pngBytes is a valid 1x1 PNG, enough for content sniffing and serving.
+var pngBytes = []byte{
+	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+	0x49, 0x48, 0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+	0x08, 0x06, 0x00, 0x00, 0x00, 0x1f, 0x15, 0xc4, 0x89, 0x00, 0x00, 0x00,
+	0x0a, 0x49, 0x44, 0x41, 0x54, 0x78, 0x9c, 0x63, 0x00, 0x01, 0x00, 0x00,
+	0x05, 0x00, 0x01, 0x0d, 0x0a, 0x2d, 0xb4, 0x00, 0x00, 0x00, 0x00, 0x49,
+	0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+}
+
+// upload POSTs a multipart screenshot and returns status and decoded body.
+func upload(t *testing.T, srv *httptest.Server, path string, content []byte) (int, map[string]string) {
+	t.Helper()
+	var buf bytes.Buffer
+	mw := multipart.NewWriter(&buf)
+	fw, err := mw.CreateFormFile("file", "shot.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := fw.Write(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := mw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	res, err := http.Post(srv.URL+path, mw.FormDataContentType(), &buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	out := map[string]string{}
+	_ = json.NewDecoder(res.Body).Decode(&out)
+	return res.StatusCode, out
+}
+
+// TestScreenshots pins the whole flow: multipart upload lands under
+// screenshots/NNN/ outside tasks/, the task body links it, one commit covers
+// both, /shots/ serves it, and junk uploads or traversal attempts bounce.
+func TestScreenshots(t *testing.T) {
+	home, srv := testStore(t)
+	shotsURL := "/api/projects/myproj/tasks/2/screenshots"
+
+	code, out := upload(t, srv, shotsURL, pngBytes)
+	if code != 201 {
+		t.Fatalf("upload status %d: %v", code, out)
+	}
+	if !strings.HasPrefix(out["path"], "screenshots/002/") || !strings.HasSuffix(out["path"], ".png") {
+		t.Fatalf("upload path = %q", out["path"])
+	}
+	img := filepath.Join(home, "myproj", out["path"])
+	if data, err := os.ReadFile(img); err != nil || !bytes.Equal(data, pngBytes) {
+		t.Fatalf("stored image: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(home, "myproj", "tasks", "002_build-board.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "## Screenshot") ||
+		!strings.Contains(string(body), "](../"+out["path"]+")") {
+		t.Errorf("task body link:\n%s", body)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): screenshot for 002_build-board" {
+		t.Errorf("commit = %q", s)
+	}
+
+	// The rendered task html routes the image through /shots/.
+	var detail struct {
+		HTML string `json:"html"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/2", &detail); code != 200 {
+		t.Fatal("detail failed")
+	}
+	if !strings.Contains(detail.HTML, `src="/shots/myproj/002/`) {
+		t.Errorf("img src not rewritten: %q", detail.HTML)
+	}
+
+	// Serving round-trips the bytes; bad names 404.
+	res, err := http.Get(srv.URL + "/shots/myproj/2/" + filepath.Base(out["path"]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	served, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if res.StatusCode != 200 || !bytes.Equal(served, pngBytes) {
+		t.Errorf("serve status %d, %d bytes", res.StatusCode, len(served))
+	}
+	for _, path := range []string{
+		"/shots/myproj/2/.hidden.png",
+		"/shots/myproj/2/..%2forder",
+		"/shots/bad%20name/2/x.png",
+		"/shots/myproj/0/x.png",
+	} {
+		res, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != 404 {
+			t.Errorf("GET %s = %d, want 404", path, res.StatusCode)
+		}
+	}
+
+	// Non-image content is refused; a second upload in the same second gets
+	// a distinct name.
+	if code, out := upload(t, srv, shotsURL, []byte("just text, not an image")); code != 400 {
+		t.Errorf("text upload = %d: %v", code, out)
+	}
+	code, out2 := upload(t, srv, shotsURL, pngBytes)
+	if code != 201 || out2["path"] == out["path"] {
+		t.Errorf("second upload = %d %q (first %q)", code, out2["path"], out["path"])
+	}
+
+	// Unknown task 404s.
+	if code, _ := upload(t, srv, "/api/projects/myproj/tasks/99/screenshots", pngBytes); code != 404 {
+		t.Errorf("unknown task upload = %d", code)
 	}
 }
 

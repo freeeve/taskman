@@ -37,7 +37,7 @@ func (t Task) Defer(reason, date string) (Task, error) {
 	nt := t
 	nt.Deferred = true
 	nt.File = nt.Name()
-	if err := appendSection(t.Path(), "Deferred "+date, reason); err != nil {
+	if err := AppendSection(t.Path(), "Deferred "+date, reason); err != nil {
 		return t, err
 	}
 	if err := os.Rename(t.Path(), nt.Path()); err != nil {
@@ -55,7 +55,7 @@ func (t Task) Resume(date string) (Task, error) {
 	nt := t
 	nt.Deferred = false
 	nt.File = nt.Name()
-	if err := appendSection(t.Path(), "Resumed "+date, ""); err != nil {
+	if err := AppendSection(t.Path(), "Resumed "+date, ""); err != nil {
 		return t, err
 	}
 	if err := os.Rename(t.Path(), nt.Path()); err != nil {
@@ -167,9 +167,9 @@ func Create(path, body string) error {
 	return err
 }
 
-// appendSection adds a dated H2 section to a task file, so the reason a task
+// AppendSection adds a dated H2 section to a task file, so the reason a task
 // left or rejoined the working set outlives the filename that carried it.
-func appendSection(path, heading, body string) error {
+func AppendSection(path, heading, body string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err

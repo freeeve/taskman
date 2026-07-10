@@ -16,6 +16,7 @@ const state = {
   swimlanes: false,
   showAllDone: false,
   tasks: [],
+  dialogTask: null,
 };
 
 async function api(path, opts) {
@@ -269,10 +270,52 @@ function render() {
 
 async function openTask(num) {
   const data = await api(`/api/projects/${state.project}/tasks/${num}`);
+  state.dialogTask = num;
   $("#dialog-file").textContent = data.task.file;
   $("#dialog-body").innerHTML = data.html;
   renderActions(data.task);
   $("#task-dialog").showModal();
+}
+
+// --- screenshots: paste or drop an image while the task dialog is open.
+// The server stores it under <project>/screenshots/NNN/ and links it from
+// the task body, so it renders inline on the next open.
+async function uploadScreenshot(file) {
+  const fd = new FormData();
+  fd.append("file", file);
+  const res = await fetch(
+    `/api/projects/${state.project}/tasks/${state.dialogTask}/screenshots`,
+    { method: "POST", body: fd }
+  );
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || res.statusText);
+  }
+  await openTask(state.dialogTask);
+}
+
+function wireScreenshots() {
+  const dialog = $("#task-dialog");
+  window.addEventListener("paste", (e) => {
+    if (!dialog.open || state.dialogTask == null) return;
+    for (const item of e.clipboardData.items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        uploadScreenshot(item.getAsFile()).catch((err) => alert(err.message || err));
+        return;
+      }
+    }
+  });
+  dialog.addEventListener("dragover", (e) => e.preventDefault());
+  dialog.addEventListener("drop", (e) => {
+    e.preventDefault();
+    for (const file of e.dataTransfer.files) {
+      if (file.type.startsWith("image/")) {
+        uploadScreenshot(file).catch((err) => alert(err.message || err));
+        return;
+      }
+    }
+  });
 }
 
 // renderActions offers the lifecycle moves valid for the task's state; every
@@ -346,6 +389,7 @@ function showError(err) {
 }
 
 wire();
+wireScreenshots();
 loadProjects()
   .then(loadTasks)
   .catch(showError);

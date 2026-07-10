@@ -29,6 +29,8 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/defer", s.deferTask)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/resume", s.resumeTask)
 	mux.HandleFunc("PUT /api/projects/{p}/order", s.setOrder)
+	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/screenshots", s.uploadScreenshot)
+	mux.HandleFunc("GET /shots/{p}/{n}/{file}", s.serveScreenshot)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, staticFS, "static/index.html")

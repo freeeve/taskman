@@ -201,8 +201,14 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .dialog-actions {
   display: flex;
   gap: 8px;
-  padding: 10px 14px 14px;
+  padding: 10px 14px 4px;
   border-top: 1px solid var(--border);
+}
+
+.dialog-hint {
+  padding: 0 14px 12px;
+  font-size: 11px;
+  color: var(--text-dim);
 }
 
 .md h1 { font-size: 19px; }

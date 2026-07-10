@@ -32,6 +32,8 @@ func run(args []string) error {
 		return cmdList(rest)
 	case "next":
 		return cmdNext(rest)
+	case "top":
+		return cmdTop(rest)
 	case "new":
 		return cmdNew(rest)
 	case "start":
@@ -74,6 +76,8 @@ Usage:
                                open tasks (-all includes done and deferred)
   taskman projects             store projects with open/deferred counts
   taskman next                 next free task number
+  taskman top [-lane L]        highest-priority pending task (next is a
+                               number; top is a task)
   taskman new [-lane L] <description>
                                create the next numbered pending task; the lane
                                token routes it to a session or submodule

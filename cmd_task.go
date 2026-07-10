@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/freeeve/taskman/internal/store"
 	"github.com/freeeve/taskman/internal/task"
 )
 
@@ -112,7 +113,17 @@ func cmdStatus(args []string, s task.Status) error {
 		return err
 	}
 	fmt.Printf("%s -> %s\n", t.File, nt.File)
-	p.commit(*noCommit, fmt.Sprintf("%s %s", statusVerb[s], nt.Stem()), t.Path(), nt.Path())
+	paths := []string{t.Path(), nt.Path()}
+	if s == task.Done && nt.HasNum {
+		op, err := store.PruneOrder(filepath.Dir(p.Dir), map[int]bool{nt.Num: true})
+		if err != nil {
+			return err
+		}
+		if op != "" {
+			paths = append(paths, op)
+		}
+	}
+	p.commit(*noCommit, fmt.Sprintf("%s %s", statusVerb[s], nt.Stem()), paths...)
 	return nil
 }
 

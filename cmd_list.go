@@ -67,9 +67,10 @@ func cmdList(args []string) error {
 		return err
 	}
 	dups := task.Dups(p.Tasks)
+	ordered := store.SortByOrder(p.Tasks, store.ReadOrder(filepath.Dir(p.Dir)))
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
 	shown, deferred := 0, 0
-	for _, t := range p.Tasks {
+	for _, t := range ordered {
 		if *lane != "" && t.Lane != *lane {
 			continue
 		}
@@ -98,6 +99,36 @@ func cmdList(args []string) error {
 		fmt.Printf("%d deferred (taskman list -all)\n", deferred)
 	}
 	return nil
+}
+
+// cmdTop prints the path of the highest-priority open task: the first
+// pending, undeferred task in order-file order. Where next answers "what
+// number is free", top answers "what should I pick up".
+func cmdTop(args []string) error {
+	fs := flag.NewFlagSet("top", flag.ContinueOnError)
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	lane := fs.String("lane", "", "only tasks in this lane")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p, err := openProject(*project)
+	if err != nil {
+		return err
+	}
+	for _, t := range store.SortByOrder(p.Tasks, store.ReadOrder(filepath.Dir(p.Dir))) {
+		if !t.HasNum || t.Status != task.Pending || t.Deferred {
+			continue
+		}
+		if *lane != "" && t.Lane != *lane {
+			continue
+		}
+		fmt.Println(t.Path())
+		return nil
+	}
+	if *lane != "" {
+		return fmt.Errorf("no pending tasks in project %s lane %s", p.Name, *lane)
+	}
+	return fmt.Errorf("no pending tasks in project %s", p.Name)
 }
 
 // cmdNext prints the next free number.

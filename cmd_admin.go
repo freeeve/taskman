@@ -78,15 +78,10 @@ func cmdMigrate(args []string) error {
 	if copied == 0 {
 		return fmt.Errorf("no task files found in %s", src)
 	}
-	orderPath := filepath.Join(filepath.Dir(p.Dir), "order")
+	orderPath := store.OrderPath(filepath.Dir(p.Dir))
 	if len(open) > 0 {
 		sort.Ints(open)
-		var b strings.Builder
-		b.WriteString("# priority order, top = next up; rewritten by taskman\n")
-		for _, n := range open {
-			fmt.Fprintf(&b, "%03d\n", n)
-		}
-		if err := os.WriteFile(orderPath, []byte(b.String()), 0o644); err != nil {
+		if _, err := store.WriteOrder(filepath.Dir(p.Dir), open); err != nil {
 			return err
 		}
 	}
@@ -198,13 +193,42 @@ func cmdFix(args []string) error {
 		fmt.Printf("unfillable gaps (left alone; history may reference them): %s\n",
 			strings.Join(nums, ", "))
 	}
-	if len(plan) == 0 {
-		fmt.Println("no duplicate numbers")
+	// Doctor duty: drop order entries whose task is gone or done. Advisory
+	// reads ignore them anyway; this keeps the file honest.
+	if !*dry {
+		open := map[int]bool{}
+		for _, t := range after {
+			if t.HasNum && t.Status != task.Done {
+				open[t.Num] = true
+			}
+		}
+		gone := map[int]bool{}
+		for _, n := range store.ReadOrder(filepath.Dir(p.Dir)) {
+			if !open[n] {
+				gone[n] = true
+			}
+		}
+		op, err := store.PruneOrder(filepath.Dir(p.Dir), gone)
+		if err != nil {
+			return err
+		}
+		if op != "" {
+			fmt.Println("pruned stale order entries")
+			paths = append(paths, op)
+		}
+	}
+	if len(paths) == 0 {
+		if len(plan) == 0 {
+			fmt.Println("no duplicate numbers")
+		}
 		return nil
 	}
 	if !*dry {
-		p.commit(*noCommit,
-			"renumber duplicate task numbers ("+strings.Join(moves, ", ")+")", paths...)
+		msg := "prune stale order entries"
+		if len(moves) > 0 {
+			msg = "renumber duplicate task numbers (" + strings.Join(moves, ", ") + ")"
+		}
+		p.commit(*noCommit, msg, paths...)
 	}
 	return nil
 }

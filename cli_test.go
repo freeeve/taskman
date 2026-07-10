@@ -170,6 +170,58 @@ func TestProjectFlagOverridesEnv(t *testing.T) {
 	}
 }
 
+// TestOrderAndTop drives priority through the CLI: list follows the order
+// file, top prints the first pending task, and done prunes its number from
+// the order inside the same commit.
+func TestOrderAndTop(t *testing.T) {
+	home, _ := storeLedger(t, "orderproj",
+		"001_low.md", "002_started.in-progress.md", "003_urgent.md", "004-e2e_laned.md")
+	if err := os.WriteFile(filepath.Join(home, "orderproj", "order"),
+		[]byte("# header\n003\n004\n001\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := capture(t, func() { _ = run([]string{"list"}) })
+	if u, l := strings.Index(out, "urgent"), strings.Index(out, "low"); u < 0 || l < 0 || u > l {
+		t.Errorf("list must follow order file (urgent before low):\n%s", out)
+	}
+
+	out = capture(t, func() { _ = run([]string{"top"}) })
+	if !strings.Contains(out, "003_urgent.md") {
+		t.Errorf("top must print the first pending task:\n%s", out)
+	}
+	out = capture(t, func() { _ = run([]string{"top", "-lane", "e2e"}) })
+	if !strings.Contains(out, "004-e2e_laned.md") {
+		t.Errorf("top -lane must respect the lane:\n%s", out)
+	}
+
+	// done prunes the finished number from the order in the same commit.
+	if err := run([]string{"done", "3"}); err != nil {
+		t.Fatalf("done: %v", err)
+	}
+	order, err := os.ReadFile(filepath.Join(home, "orderproj", "order"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(order), "003") || !strings.Contains(string(order), "001") {
+		t.Errorf("order after done:\n%s", order)
+	}
+	if status := git(t, home, "status", "--porcelain"); strings.Contains(status, "orderproj/order") {
+		t.Errorf("order prune not folded into the done commit:\n%s", status)
+	}
+
+	// With 003 done, top moves on to the next listed number.
+	out = capture(t, func() { _ = run([]string{"top"}) })
+	if !strings.Contains(out, "004-e2e_laned.md") {
+		t.Errorf("top after done:\n%s", out)
+	}
+
+	// An empty lane errors rather than printing nothing.
+	if err := run([]string{"top", "-lane", "nope"}); err == nil {
+		t.Error("top with no matching tasks must error")
+	}
+}
+
 // TestLanes drives lane routing through the CLI: new -lane, the list filter,
 // and the lane command's set/clear renames.
 func TestLanes(t *testing.T) {

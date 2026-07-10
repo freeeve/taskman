@@ -1,5 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { BASE_URL, PROJECT, gotoBoard, uniqueDesc } from "../helpers";
+import {
+  BASE_URL,
+  PROJECT,
+  appendFeatureBody,
+  gotoBoard,
+  storeIsLocal,
+  uniqueDesc,
+} from "../helpers";
 
 /**
  * Features view tests: tab switching, feature creation and shipping, and
@@ -147,4 +154,20 @@ test("a shipped feature owns its slug: recreating it is rejected, not duplicated
 
   const feats = await (await request.get(`${base}/features`)).json();
   expect(feats.filter((f: { title: string }) => f.title === desc)).toHaveLength(1);
+});
+
+test("a feature body's screenshot link is rewritten through /shots/ like task detail", async ({
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  const desc = uniqueDesc("feature-shotlink");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  appendFeatureBody(slug, "\n![diag](../screenshots/128/x.png)\n");
+
+  const feats = await (await request.get(`${base}/features`)).json();
+  const html: string = feats.find((f: { slug: string }) => f.slug === slug).html;
+  expect(html).toContain(`src="/shots/${PROJECT}/128/x.png"`);
+  expect(html).not.toContain(`src="../screenshots/`);
 });

@@ -42,6 +42,11 @@ export function linkTasksToFeature(slug: string, nums: number[]): void {
   fs.writeFileSync(file, body.replace(/^Tasks:.*$/m, `Tasks: ${nums.join(", ")}`));
 }
 
+/** Append markdown to a feature's body on disk. Only valid when storeIsLocal(). */
+export function appendFeatureBody(slug: string, markdown: string): void {
+  fs.appendFileSync(path.join(FEATURES_DIR, `${slug}.md`), markdown);
+}
+
 /** Title prefix of the baseline fixture tasks created by global setup. */
 export const SEED_PREFIX = "seed: ";
 

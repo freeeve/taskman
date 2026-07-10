@@ -43,6 +43,12 @@ async function mutate(fn) {
     alert(err.message || err);
   }
   await loadTasks();
+  // A mutation can start from the features view (task dialog via a chip);
+  // refresh it too so chips reflect the new status without a tab switch.
+  // typeof-guarded: featuresVisible lives in features.js, loaded after us.
+  if (typeof featuresVisible !== "undefined" && featuresVisible) {
+    await loadFeatures();
+  }
 }
 
 async function loadProjects() {

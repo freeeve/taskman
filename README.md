@@ -146,17 +146,20 @@ prunes order-file entries whose tasks are gone or done.
 
 ## Agent sessions
 
-Drop this in each project repo's CLAUDE.md (adjust name and lane):
+Put the convention in the **global** `~/.claude/CLAUDE.md` once -- project
+names resolve from the repo you're standing in, so the same text serves
+every repo:
 
 ```markdown
 ## Task tracking
-Tasks live in the central taskman store (~/.taskman), project "<name>".
-- Set TASKMAN_PROJECT=<name>. Your lane is "<impl|e2e>".
+Tasks live in the central taskman store (~/.taskman), one dir per project;
+the project resolves from the enclosing repo's basename (pin long sessions
+with TASKMAN_PROJECT). Sessions with a role use a lane (impl | e2e).
 - Pick work: `taskman top -lane <lane>`, then `taskman start <n>` ->
   work -> commit -> append an Outcome section -> `taskman done <n>`.
 - New work: `taskman new -lane <lane> <desc>`. Ask another project:
   `taskman file <project> <desc>`.
-- Never read ~/.taskman/<name>/screenshots/ -- images are for the web UI
+- Never read ~/.taskman/<project>/screenshots/ -- images are for the web UI
   (`taskman serve`). Task bodies may link them; ignore the links.
 ```
 

@@ -70,18 +70,11 @@ made along the way.
 - The web server binds loopback only unless explicitly overridden; it has no
   authentication.
 
-## Session conventions (per project)
+## Session conventions
 
-Each Claude Code session's repo gets a CLAUDE.md snippet along these lines:
-
-```markdown
-## Task tracking
-Tasks live in the central taskman store (~/.taskman), project "<name>".
-- Set TASKMAN_PROJECT=<name>. Your lane is "<impl|e2e>".
-- Pick work: `taskman top -lane <lane>`, then `taskman start <n>` ->
-  work -> commit -> append an Outcome section -> `taskman done <n>`.
-- New work: `taskman new -lane <lane> <desc>`. Ask another project:
-  `taskman file <project> <desc>`.
-- Never read ~/.taskman/<name>/screenshots/ -- images are for the web UI
-  (`taskman serve`). Task bodies may link them; ignore the links.
-```
+The task-tracking convention lives once in the **global** `~/.claude/CLAUDE.md`
+(project names resolve from the repo a session stands in, so the same text
+serves every repo; see the README's "Agent sessions" section for the
+snippet). A session pins itself with `TASKMAN_PROJECT` when the repo
+basename is not the project name, and works its lane via
+`taskman top -lane <lane>`.

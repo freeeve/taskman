@@ -20,9 +20,27 @@ const state = {
 
 async function api(path, opts) {
   const res = await fetch(path, opts);
+  if (res.status === 204) return null;
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || res.statusText);
   return data;
+}
+
+function post(path, body) {
+  return api(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+}
+
+async function mutate(fn) {
+  try {
+    await fn();
+  } catch (err) {
+    alert(err.message || err);
+  }
+  await loadTasks();
 }
 
 async function loadProjects() {
@@ -60,11 +78,104 @@ function visible(t) {
   return true;
 }
 
+// --- drag and drop: across columns = status change, within pending =
+// priority reorder. Deferred cards are not draggable; their moves are
+// deliberate dialog actions.
+const drag = { num: null, status: null };
+
+function draggableCard(el, t) {
+  el.draggable = !t.deferred;
+  el.addEventListener("dragstart", (e) => {
+    drag.num = t.num;
+    drag.status = t.status;
+    el.classList.add("dragging");
+    e.dataTransfer.effectAllowed = "move";
+  });
+  el.addEventListener("dragend", () => {
+    drag.num = null;
+    el.classList.remove("dragging");
+    clearDropHints();
+  });
+  el.addEventListener("dragover", (e) => {
+    if (drag.num === null || drag.num === t.num) return;
+    if (drag.status === "pending" && t.status === "pending") {
+      e.preventDefault();
+      e.stopPropagation();
+      clearDropHints();
+      el.classList.add("drop-above");
+    }
+  });
+  el.addEventListener("drop", (e) => {
+    if (drag.num === null || drag.status !== "pending" || t.status !== "pending") return;
+    e.preventDefault();
+    e.stopPropagation();
+    reorderBefore(drag.num, t.num);
+  });
+}
+
+function clearDropHints() {
+  for (const el of document.querySelectorAll(".drop-above")) el.classList.remove("drop-above");
+  for (const el of document.querySelectorAll(".drop-target")) el.classList.remove("drop-target");
+}
+
+// reorderBefore moves dragged in front of target in the full pending order
+// (including tasks hidden by the lane filter, whose relative positions are
+// preserved), then persists the whole list.
+function reorderBefore(dragged, target) {
+  const pending = state.tasks.filter((t) => t.status === "pending" && !t.deferred).map((t) => t.num);
+  const without = pending.filter((n) => n !== dragged);
+  const at = without.indexOf(target);
+  if (at < 0) return;
+  without.splice(at, 0, dragged);
+  mutate(() =>
+    api(`/api/projects/${state.project}/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order: without }),
+    })
+  );
+}
+
+function columnDropZone(colEl, status) {
+  colEl.addEventListener("dragover", (e) => {
+    if (drag.num === null) return;
+    if (drag.status !== status) {
+      e.preventDefault();
+      clearDropHints();
+      colEl.classList.add("drop-target");
+    } else if (status === "pending") {
+      // Dropping on empty column space appends to the bottom.
+      e.preventDefault();
+    }
+  });
+  colEl.addEventListener("drop", (e) => {
+    if (drag.num === null) return;
+    e.preventDefault();
+    clearDropHints();
+    if (drag.status !== status) {
+      mutate(() => post(`/api/projects/${state.project}/tasks/${drag.num}/status`, { status }));
+    } else if (status === "pending") {
+      const pending = state.tasks
+        .filter((t) => t.status === "pending" && !t.deferred && t.num !== drag.num)
+        .map((t) => t.num);
+      pending.push(drag.num);
+      mutate(() =>
+        api(`/api/projects/${state.project}/order`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ order: pending }),
+        })
+      );
+    }
+  });
+}
+
 function card(t) {
   const el = document.createElement("div");
   el.className = "card" + (t.deferred ? " deferred" : "");
   el.dataset.num = t.num;
   el.dataset.status = t.status;
+  draggableCard(el, t);
 
   const meta = document.createElement("div");
   meta.className = "meta";
@@ -117,6 +228,7 @@ function render() {
     const colEl = document.createElement("section");
     colEl.className = "column " + col.status;
     colEl.dataset.status = col.status;
+    columnDropZone(colEl, col.status);
 
     const head = document.createElement("h2");
     head.textContent = col.label;
@@ -159,7 +271,46 @@ async function openTask(num) {
   const data = await api(`/api/projects/${state.project}/tasks/${num}`);
   $("#dialog-file").textContent = data.task.file;
   $("#dialog-body").innerHTML = data.html;
+  renderActions(data.task);
   $("#task-dialog").showModal();
+}
+
+// renderActions offers the lifecycle moves valid for the task's state; every
+// one goes through the same API (and commits) as a drag or a CLI call.
+function renderActions(t) {
+  const bar = $("#dialog-actions");
+  bar.replaceChildren();
+  const act = (label, fn) => {
+    const b = document.createElement("button");
+    b.textContent = label;
+    b.addEventListener("click", () => {
+      $("#task-dialog").close();
+      mutate(fn);
+    });
+    bar.append(b);
+  };
+  const status = (s) => () => post(`/api/projects/${state.project}/tasks/${t.num}/status`, { status: s });
+  if (t.deferred) {
+    act("resume", () => post(`/api/projects/${state.project}/tasks/${t.num}/resume`));
+    return;
+  }
+  if (t.status === "pending") act("start", status("in-progress"));
+  if (t.status !== "done") act("done", status("done"));
+  if (t.status !== "pending") act("reopen", status("pending"));
+  if (t.status !== "done") {
+    act("defer", () => {
+      const reason = prompt("Why is this held? (required)");
+      if (!reason || !reason.trim()) return Promise.resolve();
+      return post(`/api/projects/${state.project}/tasks/${t.num}/defer`, { reason: reason.trim() });
+    });
+  }
+}
+
+function newTask() {
+  const description = prompt("New task description:");
+  if (!description || !description.trim()) return;
+  const lane = state.lane;
+  mutate(() => post(`/api/projects/${state.project}/tasks`, { description: description.trim(), lane }));
 }
 
 function wire() {
@@ -182,6 +333,7 @@ function wire() {
     render();
   });
   $("#dialog-close").addEventListener("click", () => $("#task-dialog").close());
+  $("#new-task").addEventListener("click", newTask);
 }
 
 function showError(err) {

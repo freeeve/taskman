@@ -139,6 +139,23 @@ func Slugify(desc string) string {
 	return b.String()
 }
 
+// New creates the next numbered pending task in dir with the standard body,
+// returning it. The lane must already be slugified (or empty); desc keeps its
+// human form in the title.
+func New(dir string, tasks []Task, desc, lane, date string) (Task, error) {
+	slug := Slugify(desc)
+	if slug == "" {
+		return Task{}, fmt.Errorf("description %q yields an empty slug", desc)
+	}
+	t := Task{Dir: dir, Num: NextNum(tasks), HasNum: true, Slug: slug, Lane: lane}
+	t.File = t.Name()
+	body := fmt.Sprintf("# %03d -- %s\n\nOpened %s.\n", t.Num, desc, date)
+	if err := Create(t.Path(), body); err != nil {
+		return Task{}, err
+	}
+	return t, nil
+}
+
 // Create writes a new file, refusing to overwrite an existing task.
 func Create(path, body string) error {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)

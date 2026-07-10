@@ -24,6 +24,11 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("GET /api/projects/{p}/tasks", s.tasks)
 	mux.HandleFunc("GET /api/projects/{p}/tasks/{n}", s.taskDetail)
 	mux.HandleFunc("GET /api/projects/{p}/features", s.features)
+	mux.HandleFunc("POST /api/projects/{p}/tasks", s.createTask)
+	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/status", s.setStatus)
+	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/defer", s.deferTask)
+	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/resume", s.resumeTask)
+	mux.HandleFunc("PUT /api/projects/{p}/order", s.setOrder)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))
 	mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
 		http.ServeFileFS(w, r, staticFS, "static/index.html")

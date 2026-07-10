@@ -28,18 +28,12 @@ func cmdNew(args []string) error {
 	if err != nil {
 		return err
 	}
-	num := task.NextNum(p.Tasks)
-	slug := task.Slugify(desc)
-	if slug == "" {
-		return fmt.Errorf("description %q yields an empty slug", desc)
-	}
-	t := task.Task{Dir: p.Dir, Num: num, HasNum: true, Slug: slug, Lane: task.Slugify(*lane)}
-	if *lane != "" && t.Lane == "" {
+	laneTok := task.Slugify(*lane)
+	if *lane != "" && laneTok == "" {
 		return fmt.Errorf("lane %q yields an empty token", *lane)
 	}
-	t.File = t.Name()
-	body := fmt.Sprintf("# %03d -- %s\n\nOpened %s.\n", num, desc, time.Now().Format("2006-01-02"))
-	if err := task.Create(t.Path(), body); err != nil {
+	t, err := task.New(p.Dir, p.Tasks, desc, laneTok, time.Now().Format("2006-01-02"))
+	if err != nil {
 		return err
 	}
 	fmt.Println(t.Path())

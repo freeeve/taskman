@@ -16,6 +16,7 @@ const state = {
   swimlanes: false,
   showAllDone: false,
   tasks: [],
+  projects: [],
   dialogTask: null,
 };
 
@@ -46,18 +47,119 @@ async function mutate(fn) {
 
 async function loadProjects() {
   const projects = await api("/api/projects");
+  state.projects = projects;
+  // The hidden select stays the state holder: its value and change event
+  // are the contract board.js and features.js already listen on; the
+  // picker below is only the visible UI.
   const sel = $("#project");
   sel.replaceChildren();
-  for (const p of projects) {
-    const opt = document.createElement("option");
-    opt.value = p.name;
-    opt.textContent = `${p.name} (${p.open})`;
-    sel.append(opt);
-  }
+  for (const p of projects) sel.append(new Option(p.name, p.name));
   if (!projects.some((p) => p.name === state.project)) {
     state.project = projects[0] ? projects[0].name : "";
   }
   sel.value = state.project;
+  updateProjectButton();
+}
+
+// --- searchable project picker (ctrl/cmd+k): filters as you type, busy
+// projects first, idle ones dimmed; selection flows through the hidden
+// select's change event.
+let pickerIndex = 0;
+
+function updateProjectButton() {
+  const p = state.projects.find((x) => x.name === state.project);
+  $("#project-button").textContent = p ? `${p.name} (${p.open})` : state.project || "no projects";
+}
+
+function pickerMatches(q) {
+  const needle = q.trim().toLowerCase();
+  return state.projects
+    .filter((p) => p.name.includes(needle))
+    .sort((a, b) => b.open - a.open || a.name.localeCompare(b.name));
+}
+
+function renderPicker() {
+  const list = $("#picker-list");
+  const matches = pickerMatches($("#picker-search").value);
+  pickerIndex = Math.min(pickerIndex, Math.max(0, matches.length - 1));
+  list.replaceChildren();
+  matches.forEach((p, i) => {
+    const li = document.createElement("li");
+    if (p.open === 0 && p.deferred === 0) li.classList.add("dim");
+    if (i === pickerIndex) li.classList.add("active");
+    const name = document.createElement("span");
+    name.textContent = p.name;
+    li.append(name);
+    const counts = document.createElement("span");
+    counts.className = "counts";
+    counts.textContent = p.deferred ? `${p.open} open · ${p.deferred} deferred` : `${p.open} open`;
+    li.append(counts);
+    li.addEventListener("click", () => selectProject(p.name));
+    list.append(li);
+  });
+  if (!matches.length) {
+    const li = document.createElement("li");
+    li.className = "dim";
+    li.textContent = "no matching projects";
+    list.append(li);
+  }
+}
+
+function openPicker() {
+  pickerIndex = 0;
+  $("#picker-search").value = "";
+  $("#picker-panel").hidden = false;
+  renderPicker();
+  $("#picker-search").focus();
+}
+
+function closePicker() {
+  $("#picker-panel").hidden = true;
+}
+
+function selectProject(name) {
+  closePicker();
+  const sel = $("#project");
+  sel.value = name;
+  sel.dispatchEvent(new Event("change"));
+  updateProjectButton();
+}
+
+function wirePicker() {
+  $("#project-button").addEventListener("click", () => {
+    if ($("#picker-panel").hidden) openPicker();
+    else closePicker();
+  });
+  $("#picker-search").addEventListener("input", () => {
+    pickerIndex = 0;
+    renderPicker();
+  });
+  $("#picker-search").addEventListener("keydown", (e) => {
+    const matches = pickerMatches($("#picker-search").value);
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      pickerIndex = Math.min(pickerIndex + 1, matches.length - 1);
+      renderPicker();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      pickerIndex = Math.max(pickerIndex - 1, 0);
+      renderPicker();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (matches[pickerIndex]) selectProject(matches[pickerIndex].name);
+    } else if (e.key === "Escape") {
+      closePicker();
+    }
+  });
+  document.addEventListener("click", (e) => {
+    if (!e.target.closest(".picker")) closePicker();
+  });
+  document.addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      openPicker();
+    }
+  });
 }
 
 async function loadTasks() {
@@ -361,6 +463,7 @@ function wire() {
     state.project = e.target.value;
     localStorage.setItem("taskman.project", state.project);
     state.showAllDone = false;
+    updateProjectButton();
     loadTasks().catch(showError);
   });
   $("#lane").addEventListener("change", (e) => {
@@ -389,6 +492,7 @@ function showError(err) {
 }
 
 wire();
+wirePicker();
 wireScreenshots();
 loadProjects()
   .then(loadTasks)

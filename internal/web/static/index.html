@@ -13,7 +13,14 @@
     <button id="tab-tasks" class="active">tasks</button>
     <button id="tab-features">features</button>
   </nav>
-  <select id="project" title="project"></select>
+  <div class="picker">
+    <button id="project-button" title="switch project (ctrl+k)"></button>
+    <div id="picker-panel" hidden>
+      <input id="picker-search" type="search" placeholder="find a project..." autocomplete="off">
+      <ul id="picker-list"></ul>
+    </div>
+  </div>
+  <select id="project" hidden></select>
   <select id="lane" title="lane"><option value="">all lanes</option></select>
   <label class="toggle"><input type="checkbox" id="show-deferred"> deferred</label>
   <label class="toggle"><input type="checkbox" id="swimlanes"> swimlanes</label>

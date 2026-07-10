@@ -238,6 +238,60 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; }
 .md a { color: var(--accent); }
 
+.picker { position: relative; }
+
+#project-button {
+  display: inline-flex;
+  align-items: center;
+  min-width: 150px;
+}
+
+#picker-panel {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 50;
+  width: 300px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 8px;
+}
+
+#picker-search {
+  width: 100%;
+  margin-bottom: 6px;
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+#picker-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+#picker-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+#picker-list li.active, #picker-list li:hover { background: var(--surface-2); }
+#picker-list li.dim { opacity: 0.55; }
+#picker-list .counts { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+
 .tabs { display: inline-flex; gap: 2px; }
 .tabs button { border-radius: 6px; color: var(--text-dim); background: none; border-color: transparent; }
 .tabs button.active { color: var(--text); background: var(--surface-2); border-color: var(--border); }

@@ -1,0 +1,187 @@
+package store
+
+import (
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// gitIdentity gives git an identity via the environment so commits work in
+// pristine test homes without touching any config file.
+func gitIdentity(t *testing.T) {
+	t.Helper()
+	t.Setenv("GIT_AUTHOR_NAME", "Test")
+	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.org")
+	t.Setenv("GIT_COMMITTER_NAME", "Test")
+	t.Setenv("GIT_COMMITTER_EMAIL", "test@example.org")
+}
+
+// testHome points TASKMAN_HOME at a fresh temp store.
+func testHome(t *testing.T) string {
+	t.Helper()
+	home := filepath.Join(t.TempDir(), "store")
+	t.Setenv("TASKMAN_HOME", home)
+	gitIdentity(t)
+	return home
+}
+
+// gitOut runs git in dir and returns its trimmed output.
+func gitOut(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %v: %s", args, err, out)
+	}
+	return strings.TrimSpace(string(out))
+}
+
+func TestHome(t *testing.T) {
+	t.Setenv("TASKMAN_HOME", "/somewhere/else")
+	if h, err := Home(); err != nil || h != "/somewhere/else" {
+		t.Errorf("Home() = %q, %v", h, err)
+	}
+	t.Setenv("TASKMAN_HOME", "")
+	h, err := Home()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Base(h) != ".taskman" {
+		t.Errorf("default Home() = %q, want ~/.taskman", h)
+	}
+}
+
+func TestEnsureInitializesOnce(t *testing.T) {
+	home := testHome(t)
+	got, err := Ensure()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != home {
+		t.Errorf("Ensure() = %q, want %q", got, home)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".git")); err != nil {
+		t.Fatalf("store not a git repo: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "README.md")); err != nil {
+		t.Fatalf("seed README missing: %v", err)
+	}
+	if log := gitOut(t, home, "log", "--format=%s"); !strings.Contains(log, "initialize taskman store") {
+		t.Errorf("seed commit missing: %q", log)
+	}
+	// A second Ensure is a no-op: same home, still exactly one commit.
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	if n := gitOut(t, home, "rev-list", "--count", "HEAD"); n != "1" {
+		t.Errorf("Ensure must be idempotent; %s commits", n)
+	}
+}
+
+func TestEnsureProject(t *testing.T) {
+	home := testHome(t)
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	dir, err := EnsureProject(home, "myproj")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, d := range []string{"tasks", "features", "screenshots"} {
+		if fi, err := os.Stat(filepath.Join(dir, d)); err != nil || !fi.IsDir() {
+			t.Errorf("missing %s/: %v", d, err)
+		}
+	}
+}
+
+func TestResolvePrecedence(t *testing.T) {
+	gitIdentity(t)
+
+	// The flag beats everything and is slugified.
+	t.Setenv("TASKMAN_PROJECT", "envproj")
+	if got, err := Resolve("Flag Proj"); err != nil || got != "flag-proj" {
+		t.Errorf("Resolve(flag) = %q, %v", got, err)
+	}
+	// The env var beats directory-derived names.
+	if got, err := Resolve(""); err != nil || got != "envproj" {
+		t.Errorf("Resolve(env) = %q, %v", got, err)
+	}
+
+	// The enclosing git repo's basename beats the cwd basename.
+	t.Setenv("TASKMAN_PROJECT", "")
+	repo := filepath.Join(t.TempDir(), "My Repo")
+	sub := filepath.Join(repo, "internal", "deep")
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if out, err := exec.Command("git", "-C", repo, "init", "-q", "-b", "main").CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	t.Chdir(sub)
+	if got, err := Resolve(""); err != nil || got != "my-repo" {
+		t.Errorf("Resolve(git toplevel) = %q, %v", got, err)
+	}
+
+	// Outside any repo, the cwd basename is the fallback.
+	plain := filepath.Join(t.TempDir(), "Plain Dir")
+	if err := os.MkdirAll(plain, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(plain)
+	if got, err := Resolve(""); err != nil || got != "plain-dir" {
+		t.Errorf("Resolve(cwd) = %q, %v", got, err)
+	}
+
+	// A name that slugifies to nothing is an error, not a mystery directory.
+	if _, err := Resolve("---"); err == nil {
+		t.Error("unslugifiable name must error")
+	}
+}
+
+func TestProjects(t *testing.T) {
+	home := testHome(t)
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{"beta", "alpha"} {
+		if _, err := EnsureProject(home, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	names, err := Projects(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(names, " ") != "alpha beta" {
+		t.Errorf("Projects = %v (dotdirs and files must be excluded, sorted)", names)
+	}
+}
+
+// TestCommitRetriesIndexLock pins the shared-store contract: a transient
+// index.lock held by another process delays a commit instead of failing it.
+func TestCommitRetriesIndexLock(t *testing.T) {
+	home := testHome(t)
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "file.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	lock := filepath.Join(home, ".git", "index.lock")
+	if err := os.WriteFile(lock, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond)
+		os.Remove(lock)
+	}()
+	if err := Commit(home, "chore(store): survive a transient lock", []string{path}); err != nil {
+		t.Fatalf("Commit did not ride out the transient lock: %v", err)
+	}
+	if log := gitOut(t, home, "log", "-1", "--format=%s"); !strings.Contains(log, "transient lock") {
+		t.Errorf("commit missing after retry: %q", log)
+	}
+}

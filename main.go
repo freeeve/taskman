@@ -1,10 +1,10 @@
-// Command taskman manages the tasks/ ledger convention shared by Eve's
-// repos: one numbered markdown file per task, status carried by filename
-// (001_slug.md -> .in-progress.md -> .done.md), deferral carried by an
-// orthogonal .deferred marker on top of that status, cross-repo asks filed
-// with a filer prefix (qbd_slug.md) and renumbered on adoption. Every mutating
-// command commits the touched task files with a git pathspec, so concurrent
-// sessions' staged work is never swept along (-no-commit opts out).
+// Command taskman manages central task ledgers for Eve's projects: one
+// directory per project in the taskman store ($TASKMAN_HOME, default
+// ~/.taskman, itself a git repository), one numbered markdown file per task,
+// status carried by filename (001_slug.md -> .in-progress.md -> .done.md),
+// deferral carried by an orthogonal .deferred marker on top of that status.
+// Every mutating command commits the touched files with a git pathspec, so
+// concurrent sessions' work is never swept along (-no-commit opts out).
 package main
 
 import (
@@ -31,7 +31,7 @@ func run(args []string) error {
 	case "list", "ls":
 		return cmdList(rest)
 	case "next":
-		return cmdNext()
+		return cmdNext(rest)
 	case "new":
 		return cmdNew(rest)
 	case "start":
@@ -50,6 +50,8 @@ func run(args []string) error {
 		return cmdFile(rest)
 	case "fix", "doctor":
 		return cmdFix(rest)
+	case "projects":
+		return cmdProjects(rest)
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -61,10 +63,11 @@ func run(args []string) error {
 
 // usage prints the command summary.
 func usage() {
-	fmt.Fprint(os.Stderr, `taskman - tasks/ ledger helper
+	fmt.Fprint(os.Stderr, `taskman - central task ledger helper
 
 Usage:
   taskman [list] [-all]        open tasks (-all includes done and deferred)
+  taskman projects             store projects with open/deferred counts
   taskman next                 next free task number
   taskman new <description>    create the next numbered pending task
   taskman start <n|slug>       mark in-progress
@@ -75,14 +78,16 @@ Usage:
                                the reason recorded in the task body
   taskman resume <n|slug>      lift a deferral, restoring the prior status
   taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
-  taskman file [-as filer] <repo-dir> <description>
-                               file a cross-repo ask into another repo's tasks/
-                               at that ledger's next number, committed there
+  taskman file [-as filer] <project> <description>
+                               file an ask into another project's ledger at
+                               its next number, committed immediately
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
 
-The tasks/ directory is found by walking up from the current directory.
-Mutating commands git-commit the touched task files (pathspec-scoped);
-pass -no-commit after the subcommand to skip that.
+Ledgers live in the central store ($TASKMAN_HOME, default ~/.taskman), one
+directory per project. The project is resolved from -p, TASKMAN_PROJECT, the
+enclosing git repo's basename, then the cwd basename. Mutating commands
+git-commit the touched files in the store (pathspec-scoped); pass -no-commit
+after the subcommand to skip that.
 `)
 }

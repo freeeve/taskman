@@ -182,24 +182,6 @@ func TestLoadOrderAndDups(t *testing.T) {
 	}
 }
 
-func TestFindTasksDirWalksUp(t *testing.T) {
-	dir := ledger(t, "001_one.md")
-	nested := filepath.Join(filepath.Dir(dir), "internal", "deep")
-	if err := os.MkdirAll(nested, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	got, err := FindTasksDir(nested)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != dir {
-		t.Errorf("FindTasksDir = %q, want %q", got, dir)
-	}
-	if _, err := FindTasksDir(t.TempDir()); err == nil {
-		t.Error("want error when no tasks/ exists upward")
-	}
-}
-
 func TestFind(t *testing.T) {
 	dir := ledger(t, "001_alpha.md", "012_beta.md", "012_gamma.md", "qbd_ask.md")
 	tasks, _ := Load(dir)

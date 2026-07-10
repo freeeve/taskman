@@ -3,7 +3,6 @@ package task
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,26 +38,6 @@ func Load(dir string) ([]Task, error) {
 		return a.Slug < b.Slug
 	})
 	return tasks, nil
-}
-
-// FindTasksDir walks upward from start looking for a tasks/ directory,
-// mirroring how git finds its root.
-func FindTasksDir(start string) (string, error) {
-	dir, err := filepath.Abs(start)
-	if err != nil {
-		return "", err
-	}
-	for {
-		cand := filepath.Join(dir, "tasks")
-		if fi, err := os.Stat(cand); err == nil && fi.IsDir() {
-			return cand, nil
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			return "", fmt.Errorf("no tasks/ directory found from %s upward", start)
-		}
-		dir = parent
-	}
 }
 
 // NextNum returns the next free task number: one past the highest in use, so

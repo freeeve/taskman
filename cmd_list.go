@@ -4,19 +4,49 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"text/tabwriter"
 
+	"github.com/freeeve/taskman/internal/store"
 	"github.com/freeeve/taskman/internal/task"
 )
 
-// tasksHere locates the ledger for the current directory.
-func tasksHere() (string, []task.Task, error) {
-	dir, err := task.FindTasksDir(".")
+// proj is a resolved store project with its ledger loaded.
+type proj struct {
+	Home  string // store root (the git repo)
+	Name  string // project name (directory under the root)
+	Dir   string // the project's tasks/ directory
+	Tasks []task.Task
+}
+
+// openProject ensures the store exists, resolves flagVal (falling back to
+// TASKMAN_PROJECT, the enclosing repo's basename, then the cwd basename) to a
+// project, creates its skeleton on first use, and loads its ledger.
+func openProject(flagVal string) (proj, error) {
+	home, err := store.Ensure()
 	if err != nil {
-		return "", nil, err
+		return proj{}, err
 	}
+	name, err := store.Resolve(flagVal)
+	if err != nil {
+		return proj{}, err
+	}
+	pdir, err := store.EnsureProject(home, name)
+	if err != nil {
+		return proj{}, err
+	}
+	dir := filepath.Join(pdir, "tasks")
 	tasks, err := task.Load(dir)
-	return dir, tasks, err
+	if err != nil {
+		return proj{}, err
+	}
+	return proj{Home: home, Name: name, Dir: dir, Tasks: tasks}, nil
+}
+
+// commit auto-commits paths in the store repo under the project-scoped
+// conventional message.
+func (p proj) commit(noCommit bool, msg string, paths ...string) {
+	store.AutoCommit(noCommit, p.Home, fmt.Sprintf("chore(%s): %s", p.Name, msg), paths...)
 }
 
 // cmdList prints the ledger, open tasks by default, flagging duplicate
@@ -27,17 +57,18 @@ func tasksHere() (string, []task.Task, error) {
 func cmdList(args []string) error {
 	fs := flag.NewFlagSet("list", flag.ContinueOnError)
 	all := fs.Bool("all", false, "include done and deferred tasks")
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
-	dir, tasks, err := tasksHere()
+	p, err := openProject(*project)
 	if err != nil {
 		return err
 	}
-	dups := task.Dups(tasks)
+	dups := task.Dups(p.Tasks)
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
 	shown, deferred := 0, 0
-	for _, t := range tasks {
+	for _, t := range p.Tasks {
 		if t.Deferred && t.Status != task.Done {
 			deferred++
 		}
@@ -57,7 +88,7 @@ func cmdList(args []string) error {
 		return err
 	}
 	if shown == 0 {
-		fmt.Printf("no open tasks in %s\n", dir)
+		fmt.Printf("no open tasks in project %s\n", p.Name)
 	}
 	if deferred > 0 && !*all {
 		fmt.Printf("%d deferred (taskman list -all)\n", deferred)
@@ -66,11 +97,55 @@ func cmdList(args []string) error {
 }
 
 // cmdNext prints the next free number.
-func cmdNext() error {
-	_, tasks, err := tasksHere()
+func cmdNext(args []string) error {
+	fs := flag.NewFlagSet("next", flag.ContinueOnError)
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p, err := openProject(*project)
 	if err != nil {
 		return err
 	}
-	fmt.Printf("%03d\n", task.NextNum(tasks))
+	fmt.Printf("%03d\n", task.NextNum(p.Tasks))
 	return nil
+}
+
+// cmdProjects lists the store's projects with open and deferred counts.
+func cmdProjects(args []string) error {
+	fs := flag.NewFlagSet("projects", flag.ContinueOnError)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	home, err := store.Ensure()
+	if err != nil {
+		return err
+	}
+	names, err := store.Projects(home)
+	if err != nil {
+		return err
+	}
+	if len(names) == 0 {
+		fmt.Printf("no projects in %s\n", home)
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
+	for _, name := range names {
+		tasks, err := task.Load(filepath.Join(home, name, "tasks"))
+		if err != nil && !os.IsNotExist(err) {
+			return err
+		}
+		open, deferred := 0, 0
+		for _, t := range tasks {
+			switch {
+			case t.Status == task.Done:
+			case t.Deferred:
+				deferred++
+			default:
+				open++
+			}
+		}
+		fmt.Fprintf(w, "%s\t%d open\t%d deferred\n", name, open, deferred)
+	}
+	return w.Flush()
 }

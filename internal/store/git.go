@@ -1,12 +1,14 @@
 // Package store owns where ledgers live and how their mutations are
-// persisted: git plumbing today, the central taskman store as it grows.
+// persisted: the central taskman store directory and its git repository.
 package store
 
 import (
 	"fmt"
+	"math/rand"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // gitDir reports whether dir sits inside a git work tree.
@@ -19,6 +21,25 @@ func gitDir(dir string) bool {
 // vanished source can still be staged as a deletion.
 func gitTracked(dir, path string) bool {
 	return exec.Command("git", "-C", dir, "ls-files", "--error-unmatch", "--", path).Run() == nil
+}
+
+// gitRetry runs a git command, retrying briefly when another process holds
+// .git/index.lock -- multiple sessions and the web UI share the store repo,
+// so short lock collisions are expected and transient.
+func gitRetry(verb string, args []string) error {
+	var lastErr error
+	for range 3 {
+		out, err := exec.Command("git", args...).CombinedOutput()
+		if err == nil {
+			return nil
+		}
+		lastErr = fmt.Errorf("git %s: %v: %s", verb, err, strings.TrimSpace(string(out)))
+		if !strings.Contains(string(out), "index.lock") {
+			return lastErr
+		}
+		time.Sleep(time.Duration(100+rand.Intn(200)) * time.Millisecond)
+	}
+	return lastErr
 }
 
 // Commit stages exactly the given paths and commits them with a pathspec,
@@ -38,14 +59,11 @@ func Commit(dir, msg string, paths []string) error {
 		return fmt.Errorf("no committable paths")
 	}
 	add := append([]string{"-C", dir, "add", "-A", "--"}, known...)
-	if out, err := exec.Command("git", add...).CombinedOutput(); err != nil {
-		return fmt.Errorf("git add: %v: %s", err, strings.TrimSpace(string(out)))
+	if err := gitRetry("add", add); err != nil {
+		return err
 	}
 	commit := append([]string{"-C", dir, "commit", "-q", "-m", msg, "--"}, known...)
-	if out, err := exec.Command("git", commit...).CombinedOutput(); err != nil {
-		return fmt.Errorf("git commit: %v: %s", err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	return gitRetry("commit", commit)
 }
 
 // AutoCommit commits task-file paths unless disabled, downgrading git

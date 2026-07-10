@@ -1,110 +1,172 @@
 # taskman
 
-A tiny CLI for the `tasks/` ledger convention used across these repos: one
-markdown file per task, status carried by the filename, numbers minted by the
-repo that owns the ledger.
+Central task ledgers for multi-project, multi-agent development: one
+markdown file per task in a store taskman owns (`$TASKMAN_HOME`, default
+`~/.taskman`), status carried by the filename, every mutation a git commit,
+and a kanban web UI over the same files (`taskman serve`).
+
+```
+~/.taskman/                    the store: a git repo, one dir per project
+  <project>/
+    tasks/                     the ledger
+    features/                  product source of truth (markdown specs)
+    screenshots/012/           images attached to task 012 (web UI only)
+    order                      priority, one task number per line, top first
+```
 
 ```
 001_description.md                       pending
 001_description.in-progress.md           in progress
 001_description.done.md                  done
+012-impl_description.md                  routed to the "impl" lane
 001_description.deferred.md              deferred: held on an external decision
 001_description.in-progress.deferred.md  ...and it was already underway
-qbd_description.md                       LEGACY cross-repo ask filed unnumbered
-                                         by another repo's session ("qbd" = the
-                                         filer); renumber with `taskman adopt`
+qbd_description.md                       LEGACY unnumbered cross-repo ask
+                                         ("qbd" = the filer); `taskman adopt`
 ```
+
+The project is resolved from `-p`, then `TASKMAN_PROJECT`, then the
+enclosing git repo's basename, then the cwd basename -- so inside a repo,
+plain `taskman` just works, and an agent session pins itself with one env
+var. Docs: [requirements](docs/requirements.md),
+[architecture](docs/architecture.md), [design decisions](docs/design.md).
 
 ## Usage
 
 ```
-taskman [list] [-all]        open tasks (-all includes done and deferred);
-                             flags duplicate numbers and unadopted asks
-taskman next                 next free task number
-taskman new <description>    create the next numbered pending task
-taskman start <n|slug>       mark in-progress   (rename)
-taskman done <n|slug>        mark done          (rename)
-taskman reopen <n|slug>      back to pending    (rename)
+taskman [list] [-all] [-lane L]  open tasks in priority order (-all includes
+                                 done and deferred); flags duplicates
+taskman projects                 store projects with open/deferred counts
+taskman next                     next free task number
+taskman top [-lane L]            highest-priority pending task -- what to
+                                 pick up ("next is a number, top is a task")
+taskman new [-lane L] <desc>     create the next numbered pending task
+taskman start <n|slug>           mark in-progress   (rename)
+taskman done <n|slug>            mark done          (rename; prunes order)
+taskman reopen <n|slug>          back to pending    (rename)
+taskman lane <n|slug> <lane|->   set or clear a task's lane (rename)
 taskman defer -reason <why> <n|slug>
-                             hold on an external decision (rename); the reason
-                             is appended to the task body and is required
-taskman resume <n|slug>      lift a deferral, restoring the status underneath
-taskman adopt <name>         renumber a legacy prefixed cross-repo ask into
-                             the ledger and stamp the number into its H1
-taskman file [-as filer] <repo-dir> <description>
-                             file a cross-repo ask into another repo's
-                             tasks/ at THAT ledger's next number, committed
-                             there immediately (filer credit defaults to the
-                             current repo's dir name; duplicate slugs refuse)
-taskman fix [-n]             repair the ledger: duplicate numbers are
-                             renumbered into the lowest free slots (gaps
-                             first) with the H1 restamped; -n reports only
+                                 hold on an external decision; the reason is
+                                 appended to the body and is required
+taskman resume <n|slug>          lift a deferral, restoring the status under it
+taskman adopt <name>             renumber a legacy prefixed ask into the ledger
+taskman feature new <desc>       create a feature spec in features/
+taskman feature list [-all]      features with a done-task rollup
+taskman feature done <slug>      mark a feature shipped
+taskman file [-as filer] <project> <desc>
+                                 file an ask into another project's ledger at
+                                 its next number, committed immediately
+taskman fix [-n]                 renumber duplicates into the lowest free
+                                 slots and prune stale order entries
+taskman migrate [-prune] <repo-dir> [project]
+                                 import a repo-local tasks/ ledger (empty
+                                 project only); -prune removes the source
+taskman serve [-addr host:port]  kanban web UI, localhost only by default
 ```
 
-The `tasks/` directory is discovered by walking up from the current
-directory, so any subdirectory of a repo works. `start`/`done`/`reopen`
-accept a task number or a unique slug fragment; a duplicate number (the
-ledgers have historical collisions) or ambiguous fragment errors with the
-candidates instead of guessing.
+All commands take `-p <project>`; mutating commands take `-no-commit`.
+`start`/`done`/etc. accept a number or a unique slug fragment; ambiguity
+errors with the candidates instead of guessing.
 
-Every mutating command commits the touched task files automatically with a
-pathspec-scoped `git add`/`git commit` (`chore(tasks): …`), so a concurrent
-session's staged work in the same repo is never swept into the commit. Pass
-`-no-commit` after the subcommand to skip it; outside a git repo the
-operation still succeeds with a warning.
+Every mutation commits the touched files with a pathspec-scoped
+`git add`/`git commit` (`chore(<project>): …`) in the store repo, so
+concurrent sessions -- even on different projects -- never sweep each
+other's work into a commit. Outside git problems degrade to a warning; the
+ledger operation itself always wins.
+
+## Lanes
+
+A lane is a routing token in the filename (`012-impl_fix-thing.md`): which
+session, submodule, or workstream owns the task. The intended setup is two
+Claude Code sessions per project -- `impl` (implements and releases) and
+`e2e` (end-to-end tests) -- each picking work with `taskman top -lane X`.
+Lanes are free-form, live inside the filename stem, and therefore survive
+every status rename with no extra bookkeeping. Numbers stay one sequence
+per project across lanes.
+
+## Priority
+
+Each project may have an `order` file: task numbers, one per line, top
+first. It is *advisory* -- reading is lenient (comments, garbage, and
+unknown numbers are skipped), unlisted tasks simply sort after listed ones,
+and a missing file means ledger order. `list` and `top` follow it; marking
+a task done prunes its number in the same commit; dragging cards in the web
+UI rewrites the file as one commit. New tasks land unlisted at the bottom
+until someone ranks them.
+
+## Features
+
+`features/` holds the product's source of truth: one markdown spec per
+feature (requirements and design notes live in the body), renamed to
+`.done.md` when shipped. A `Tasks: 012, 019` line links the implementing
+tasks; `taskman feature list` and the web UI roll up their completion.
+Linking is a one-line body edit by design.
+
+## Web UI
+
+`taskman serve` (default `127.0.0.1:7777`; `scripts/restart-webui.sh` for a
+rebuild-and-restart loop) renders the kanban board: columns by status, drag
+across columns to change status, drag within pending to reprioritize, lane
+filter and swimlanes, a deferred toggle (deferred cards are badged and
+greyed, moved only via explicit dialog actions), a features tab with
+per-task status chips, and full GitHub-flavored markdown in the task dialog
+(goldmark, server-side -- the module's only dependency). Every UI action
+runs the same code paths and leaves the same commit as its CLI twin.
+
+Screenshots: paste or drop an image on the task dialog. It lands in
+`<project>/screenshots/<NNN>/`, the task body gains a dated link, and both
+commit together. Images live outside `tasks/` so agent sessions never spend
+tokens reading them. The server refuses non-loopback binds without
+`-insecure-bind` because the API has no auth.
 
 ## Deferral
 
 A deferred task is one that is *not being worked, and that is a decision* --
-it waits on someone's call, not on an engineer having time. The motivating
-case: a task asking CI to publish a container image on every version tag is
-outward-facing and irreversible, so it waits on the maintainer. Left
-`pending`, the next agent through a cron loop picks it up, which is exactly
-what must not happen; `list` does not print bodies, so a prose warning in the
-file is invisible at the moment it matters. Marking it `done` is a lie, and
-deleting it loses the reasoning.
-
-```
-taskman defer -reason "maintainer's call: outward-facing publish" 247
-taskman resume 247
-```
-
-`defer` hides the task from `taskman list` (it shows under `-all`, marked,
+it waits on someone's call, not on an engineer having time. `defer` hides
+the task from `taskman list` and `top` (it shows under `list -all`, marked,
 and the default listing prints a `N deferred` count so nothing vanishes
-silently) and appends a dated `## Deferred` section carrying the reason. The
-reason is mandatory: a deferral without a recorded why decays into an
-unexplained `pending` in six months, and the filename cannot carry it.
+silently) and appends a dated `## Deferred` section carrying the mandatory
+reason -- an unexplained deferral decays into an unexplained pending task,
+and the filename cannot carry the why.
 
-Deferral is a **flag, not a fourth status**. It is orthogonal to progress: a
-task can be deferred while pending or while in progress, and `resume` puts it
-back where it was. This is what keeps `fix` honest -- it ranks duplicate
-claimants by how far along they are, and a `deferred` status would force an
-answer to "is deferred more advanced than pending?", a question with no
-meaning. A deferred task contests a number exactly as the pending or
-in-progress task it still is. `start`, `done` and `reopen` all clear the
-deferral: acting on a task ends the hold.
-
-Note that `taskman next` prints the next free *number*, not the next task to
-pick up, so deferral does not affect it. What keeps deferred work out of the
-"what should I do next" set is its absence from `taskman list`.
+Deferral is a **flag, not a fourth status**: orthogonal to progress, so a
+task can be deferred while pending or in progress, and `resume` restores
+exactly what was underneath. This keeps `fix` honest -- deferral plays no
+part in ranking duplicate claimants. `start`, `done`, and `reopen` clear
+it: acting on a task ends the hold.
 
 ## Repair
 
-`fix` picks each duplicate's keeper deterministically -- the most advanced
-status wins (done > in-progress > pending; ledger order breaks ties), since
-the furthest-along task is the one history most likely references. Gaps no
-duplicate can fill are reported but never compacted: task numbers appear in
-commit messages and docs, so reusing or shifting them would corrupt
-references.
+`fix` picks each duplicate number's keeper deterministically -- the most
+advanced status wins (done > in-progress > pending; ledger order breaks
+ties) -- and moves losers to the lowest free slots, restamping their H1
+titles. Gaps are reported but never compacted: numbers appear in commit
+messages and docs, so shifting them would corrupt references. It also
+prunes order-file entries whose tasks are gone or done.
 
-Cross-repo asks are numbered at filing time: the immediate pathspec commit
-in the receiving repo is what makes the number claim safe (the historical
-prefix convention existed because asks used to sit uncommitted, invisible to
-concurrent sessions). `taskman adopt` remains for legacy prefixed asks and
-assigns the next free number, recording the filed name as a breadcrumb.
+## Agent sessions
+
+Drop this in each project repo's CLAUDE.md (adjust name and lane):
+
+```markdown
+## Task tracking
+Tasks live in the central taskman store (~/.taskman), project "<name>".
+- Set TASKMAN_PROJECT=<name>. Your lane is "<impl|e2e>".
+- Pick work: `taskman top -lane <lane>`, then `taskman start <n>` ->
+  work -> commit -> append an Outcome section -> `taskman done <n>`.
+- New work: `taskman new -lane <lane> <desc>`. Ask another project:
+  `taskman file <project> <desc>`.
+- Never read ~/.taskman/<name>/screenshots/ -- images are for the web UI
+  (`taskman serve`). Task bodies may link them; ignore the links.
+```
 
 ## Install
 
 ```
 go install github.com/freeeve/taskman@latest   # or: make install
 ```
+
+Coming from a pre-v1 repo-local ledger? `taskman migrate <repo-dir>` copies
+it into the store (empty project only) and seeds the order file;
+`-prune` removes the old `tasks/` with a pointer commit. The store has no
+remote by default -- add a private one to `~/.taskman` if you want backup.

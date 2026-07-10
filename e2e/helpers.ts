@@ -94,16 +94,35 @@ export function uniqueDesc(label: string): string {
 }
 
 /**
- * Open the board and switch it to the suite's project, waiting for the
- * ledger fetch that the switch triggers to land.
+ * Select a project through the searchable picker: open the panel, type the
+ * exact name to filter to a single match, and click it. The native #project
+ * select is a hidden state holder, so tests drive the picker like a user.
+ */
+export async function selectProjectViaPicker(page: Page, project: string): Promise<void> {
+  await page.locator("#project-button").click();
+  await expect(page.locator("#picker-panel")).toBeVisible();
+  await page.locator("#picker-search").fill(project);
+  await page.locator("#picker-list li", { hasText: project }).first().click();
+  await expect(page.locator("#picker-panel")).toBeHidden();
+}
+
+/**
+ * Open the board and switch it to the suite's project through the picker,
+ * waiting for the ledger fetch that the switch triggers to land. If the
+ * board already loaded on the target project (persisted selection), no
+ * switch is needed.
  */
 export async function gotoBoard(page: Page): Promise<void> {
   await page.goto("/");
   await expect(page.locator("#project option")).not.toHaveCount(0);
-  await Promise.all([
-    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/tasks`)),
-    page.locator("#project").selectOption(PROJECT),
-  ]);
+  if ((await page.locator("#project").inputValue()) !== PROJECT) {
+    await Promise.all([
+      page.waitForResponse(
+        (r) => r.url().includes(`/api/projects/${PROJECT}/tasks`) && r.request().method() === "GET"
+      ),
+      selectProjectViaPicker(page, PROJECT),
+    ]);
+  }
   await expect(page.locator(".column")).toHaveCount(3);
 }
 

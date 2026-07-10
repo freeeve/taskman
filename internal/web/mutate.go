@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -47,6 +48,11 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 	t, err := task.New(filepath.Join(projDir, "tasks"), tasks,
 		strings.TrimSpace(req.Description), task.Slugify(req.Lane), today())
 	if err != nil {
+		if os.IsExist(err) {
+			writeErr(w, http.StatusConflict,
+				fmt.Errorf("task number was claimed concurrently; retry"))
+			return
+		}
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}

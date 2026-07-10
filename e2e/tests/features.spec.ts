@@ -129,3 +129,22 @@ test("shipping an already-shipped feature 409s cleanly", async ({ request }) => 
   expect(again.status()).toBe(409);
   expect((await again.json()).error).toContain("already");
 });
+
+test("a shipped feature owns its slug: recreating it is rejected, not duplicated", async ({
+  request,
+}) => {
+  const desc = uniqueDesc("feature-collide");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  expect((await request.post(`${base}/features/${slug}/done`)).ok()).toBeTruthy();
+
+  // Re-creating the same description after shipping must be refused, or a
+  // later ship would os.Rename onto the shipped file and destroy its spec.
+  const recreate = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(recreate.status()).toBe(409);
+  expect((await recreate.json()).error).toContain("already exists");
+
+  const feats = await (await request.get(`${base}/features`)).json();
+  expect(feats.filter((f: { title: string }) => f.title === desc)).toHaveLength(1);
+});

@@ -1,4 +1,7 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import * as fs from "fs";
+import * as os from "os";
+import * as path from "path";
 
 /** Base URL of the running `taskman serve` instance under test. */
 export const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:8311";
@@ -9,6 +12,35 @@ export const BASE_URL = process.env.E2E_BASE_URL || "http://localhost:8311";
  * real ledger: `mkdir -p ~/.taskman/e2e-sandbox/tasks` to create it.
  */
 export const PROJECT = process.env.E2E_PROJECT || "e2e-sandbox";
+
+/**
+ * Store root on disk. Most of the suite is HTTP-only, but a few features
+ * specs must link tasks to a feature -- the only way is editing the
+ * feature's "Tasks:" line, which the API does not expose. Those specs edit
+ * the file directly and so only run when the store is local to the runner
+ * (the default: the server on :8311 serves this same ~/.taskman).
+ */
+export const STORE =
+  process.env.E2E_STORE || process.env.TASKMAN_HOME || path.join(os.homedir(), ".taskman");
+
+/** The suite project's features directory on disk. */
+export const FEATURES_DIR = path.join(STORE, PROJECT, "features");
+
+/** True when the store is reachable on this filesystem (gates fs-based specs). */
+export function storeIsLocal(): boolean {
+  return fs.existsSync(path.join(STORE, PROJECT));
+}
+
+/**
+ * Set a feature's linked task numbers by rewriting its "Tasks:" line on
+ * disk. Only valid when storeIsLocal(). Callers reload the features view
+ * (or the page) to see the new chips.
+ */
+export function linkTasksToFeature(slug: string, nums: number[]): void {
+  const file = path.join(FEATURES_DIR, `${slug}.md`);
+  const body = fs.readFileSync(file, "utf8");
+  fs.writeFileSync(file, body.replace(/^Tasks:.*$/m, `Tasks: ${nums.join(", ")}`));
+}
 
 /** Title prefix of the baseline fixture tasks created by global setup. */
 export const SEED_PREFIX = "seed: ";

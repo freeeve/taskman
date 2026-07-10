@@ -1,10 +1,13 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/freeeve/taskman/internal/task"
 )
 
 // Feature is one features/ markdown file: the source of truth for something
@@ -56,6 +59,25 @@ func LoadFeatures(projDir string) ([]Feature, error) {
 		features = append(features, f)
 	}
 	return features, nil
+}
+
+// NewFeature creates a feature spec from the standard template and returns
+// it; the description keeps its human form in the title.
+func NewFeature(projDir, desc, date string) (Feature, error) {
+	slug := task.Slugify(desc)
+	if slug == "" {
+		return Feature{}, fmt.Errorf("description %q yields an empty slug", desc)
+	}
+	dir := FeaturesDir(projDir)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return Feature{}, err
+	}
+	f := Feature{Dir: dir, File: slug + ".md", Slug: slug, Title: desc}
+	body := fmt.Sprintf("# %s\n\nTasks:\n\nOpened %s.\n", desc, date)
+	if err := task.Create(f.Path(), body); err != nil {
+		return Feature{}, err
+	}
+	return f, nil
 }
 
 // SetDone renames the feature to its shipped (or, for false, active) form.

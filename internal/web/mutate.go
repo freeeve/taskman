@@ -188,5 +188,69 @@ func (s *server) setOrder(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// createFeature handles POST features: {"description"} -> 201 + feature.
+func (s *server) createFeature(w http.ResponseWriter, r *http.Request) {
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req struct {
+		Description string `json:"description"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	f, err := store.NewFeature(projDir, strings.TrimSpace(req.Description), today())
+	if err != nil {
+		code := http.StatusBadRequest
+		if strings.Contains(err.Error(), "file exists") {
+			code = http.StatusConflict
+		}
+		writeErr(w, code, err)
+		return
+	}
+	s.commit(r.PathValue("p"), "feature "+f.Slug, f.Path())
+	writeJSON(w, http.StatusCreated, map[string]any{"slug": f.Slug, "done": false})
+}
+
+// featureDone handles POST features/{slug}/done.
+func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	slug := r.PathValue("slug")
+	if !nameOK.MatchString(slug) {
+		writeErr(w, http.StatusNotFound, fmt.Errorf("invalid feature %q", slug))
+		return
+	}
+	feats, err := store.LoadFeatures(projDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	for _, f := range feats {
+		if f.Slug != slug {
+			continue
+		}
+		if f.Done {
+			writeErr(w, http.StatusConflict, fmt.Errorf("%s is already done", f.File))
+			return
+		}
+		nf, err := f.SetDone(true)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		s.commit(r.PathValue("p"), "feature done "+nf.Slug, f.Path(), nf.Path())
+		writeJSON(w, http.StatusOK, map[string]any{"slug": nf.Slug, "done": true})
+		return
+	}
+	writeErr(w, http.StatusNotFound, fmt.Errorf("no feature %q", slug))
+}
+
 // today stamps mutations with the same date format as the CLI.
 func today() string { return time.Now().Format("2006-01-02") }

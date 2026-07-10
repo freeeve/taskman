@@ -44,21 +44,16 @@ func cmdFeatureNew(args []string) error {
 	if desc == "" {
 		return fmt.Errorf("usage: taskman feature new [-p project] [-no-commit] <description>")
 	}
-	slug := task.Slugify(desc)
-	if slug == "" {
-		return fmt.Errorf("description %q yields an empty slug", desc)
-	}
 	p, err := openProject(*project)
 	if err != nil {
 		return err
 	}
-	path := filepath.Join(store.FeaturesDir(filepath.Dir(p.Dir)), slug+".md")
-	body := fmt.Sprintf("# %s\n\nTasks:\n\nOpened %s.\n", desc, time.Now().Format("2006-01-02"))
-	if err := task.Create(path, body); err != nil {
+	f, err := store.NewFeature(filepath.Dir(p.Dir), desc, time.Now().Format("2006-01-02"))
+	if err != nil {
 		return err
 	}
-	fmt.Println(path)
-	p.commit(*noCommit, "feature "+slug, path)
+	fmt.Println(f.Path())
+	p.commit(*noCommit, "feature "+f.Slug, f.Path())
 	return nil
 }
 

@@ -344,6 +344,55 @@ func TestAPIMutations(t *testing.T) {
 	}
 }
 
+// TestAPIFeatureMutations drives feature creation and shipping through the
+// API with the same commit assertions as the task mutations.
+func TestAPIFeatureMutations(t *testing.T) {
+	home, srv := testStore(t)
+
+	var created struct {
+		Slug string `json:"slug"`
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features",
+		map[string]string{"description": "Search everything"}, &created); code != 201 {
+		t.Fatalf("create status %d", code)
+	}
+	path := filepath.Join(home, "myproj", "features", "search-everything.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("feature file: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "# Search everything\n") {
+		t.Errorf("template:\n%s", data)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): feature search-everything" {
+		t.Errorf("create commit = %q", s)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features",
+		map[string]string{"description": "Search everything"}, nil); code != 409 {
+		t.Errorf("duplicate feature status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features",
+		map[string]string{"description": "!!!"}, nil); code != 400 {
+		t.Errorf("empty-slug feature status %d", code)
+	}
+
+	if code := send(t, srv, "POST", "/api/projects/myproj/features/search-everything/done", nil, nil); code != 200 {
+		t.Fatalf("done status %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(home, "myproj", "features", "search-everything.done.md")); err != nil {
+		t.Fatalf("done rename: %v", err)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): feature done search-everything" {
+		t.Errorf("done commit = %q", s)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features/search-everything/done", nil, nil); code != 409 {
+		t.Errorf("re-done status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features/nope/done", nil, nil); code != 404 {
+		t.Errorf("missing feature status %d", code)
+	}
+}
+
 // pngBytes is a valid 1x1 PNG, enough for content sniffing and serving.
 var pngBytes = []byte{
 	0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
@@ -464,7 +513,7 @@ func TestScreenshots(t *testing.T) {
 
 func TestStaticAndIndex(t *testing.T) {
 	_, srv := testStore(t)
-	for _, path := range []string{"/", "/static/app.css", "/static/board.js"} {
+	for _, path := range []string{"/", "/static/app.css", "/static/board.js", "/static/features.js"} {
 		res, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)

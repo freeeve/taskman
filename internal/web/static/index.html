@@ -9,6 +9,10 @@
 <body>
 <header>
   <h1>taskman</h1>
+  <nav class="tabs">
+    <button id="tab-tasks" class="active">tasks</button>
+    <button id="tab-features">features</button>
+  </nav>
   <select id="project" title="project"></select>
   <select id="lane" title="lane"><option value="">all lanes</option></select>
   <label class="toggle"><input type="checkbox" id="show-deferred"> deferred</label>
@@ -16,6 +20,7 @@
   <button id="new-task" title="new task">+ task</button>
 </header>
 <main id="board"></main>
+<main id="features" hidden></main>
 <dialog id="task-dialog">
   <div class="dialog-head">
     <span id="dialog-file" class="mono"></span>
@@ -26,5 +31,6 @@
   <div class="dialog-hint">paste or drop an image to attach a screenshot</div>
 </dialog>
 <script src="/static/board.js"></script>
+<script src="/static/features.js"></script>
 </body>
 </html>

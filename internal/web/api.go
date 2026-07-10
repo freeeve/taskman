@@ -1,0 +1,264 @@
+package web
+
+import (
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"sort"
+	"strings"
+
+	"github.com/yuin/goldmark"
+	"github.com/yuin/goldmark/extension"
+
+	"github.com/freeeve/taskman/internal/store"
+	"github.com/freeeve/taskman/internal/task"
+)
+
+// server holds the store root; all state lives on disk.
+type server struct {
+	home string
+}
+
+// nameOK matches the slugs taskman itself generates; path segments that
+// don't match never touch the filesystem, which is also the traversal guard.
+var nameOK = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
+
+// markdown renders GitHub-flavored markdown; goldmark is the module's only
+// dependency, kept server-side so the browser stays vanilla.
+var markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
+// taskJSON is the wire shape of one task.
+type taskJSON struct {
+	Num      int    `json:"num"`
+	Lane     string `json:"lane"`
+	Slug     string `json:"slug"`
+	Status   string `json:"status"`
+	Deferred bool   `json:"deferred"`
+	File     string `json:"file"`
+	Title    string `json:"title"`
+}
+
+// writeJSON emits v with the proper content type.
+func writeJSON(w http.ResponseWriter, code int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	_ = json.NewEncoder(w).Encode(v)
+}
+
+// writeErr emits the API's uniform error shape.
+func writeErr(w http.ResponseWriter, code int, err error) {
+	writeJSON(w, code, map[string]string{"error": err.Error()})
+}
+
+// projDir validates the {p} path segment and returns the project directory.
+func (s *server) projDir(r *http.Request) (string, error) {
+	p := r.PathValue("p")
+	if !nameOK.MatchString(p) {
+		return "", fmt.Errorf("invalid project %q", p)
+	}
+	dir := filepath.Join(s.home, p)
+	if fi, err := os.Stat(dir); err != nil || !fi.IsDir() {
+		return "", fmt.Errorf("no project %q", p)
+	}
+	return dir, nil
+}
+
+// loadTasks reads a project's ledger in priority order.
+func loadTasks(projDir string) ([]task.Task, []int, error) {
+	tasks, err := task.Load(filepath.Join(projDir, "tasks"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, nil, err
+	}
+	order := store.ReadOrder(projDir)
+	return store.SortByOrder(tasks, order), order, nil
+}
+
+// titleRE strips the ledger's "NNN -- " H1 prefix for display.
+var titleRE = regexp.MustCompile(`^#\s*(?:\d+\s*(?:--|\x{2014}|\x{2013}| - )\s*)?`)
+
+// title returns the task's H1 with the number prefix stripped, falling back
+// to the slug.
+func title(t task.Task) string {
+	data, err := os.ReadFile(t.Path())
+	if err != nil {
+		return t.Slug
+	}
+	line, _, _ := strings.Cut(string(data), "\n")
+	if !strings.HasPrefix(line, "# ") {
+		return t.Slug
+	}
+	if s := strings.TrimSpace(titleRE.ReplaceAllString(line, "")); s != "" {
+		return s
+	}
+	return t.Slug
+}
+
+// toJSON converts a ledger task to its wire shape.
+func toJSON(t task.Task) taskJSON {
+	return taskJSON{
+		Num: t.Num, Lane: t.Lane, Slug: t.Slug, Status: t.Status.String(),
+		Deferred: t.Deferred, File: t.File, Title: title(t),
+	}
+}
+
+// projects lists store projects with open/deferred counts.
+func (s *server) projects(w http.ResponseWriter, r *http.Request) {
+	names, err := store.Projects(s.home)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	type projJSON struct {
+		Name     string `json:"name"`
+		Open     int    `json:"open"`
+		Deferred int    `json:"deferred"`
+	}
+	out := []projJSON{}
+	for _, name := range names {
+		tasks, _, err := loadTasks(filepath.Join(s.home, name))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		pj := projJSON{Name: name}
+		for _, t := range tasks {
+			switch {
+			case t.Status == task.Done:
+			case t.Deferred:
+				pj.Deferred++
+			default:
+				pj.Open++
+			}
+		}
+		out = append(out, pj)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// tasks returns a project's ledger pre-sorted by priority, with the order
+// and the lanes in use (for the filter dropdown).
+func (s *server) tasks(w http.ResponseWriter, r *http.Request) {
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	tasks, order, err := loadTasks(projDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if order == nil {
+		order = []int{}
+	}
+	laneSet := map[string]bool{}
+	out := []taskJSON{}
+	for _, t := range tasks {
+		out = append(out, toJSON(t))
+		if t.Lane != "" {
+			laneSet[t.Lane] = true
+		}
+	}
+	lanes := []string{}
+	for l := range laneSet {
+		lanes = append(lanes, l)
+	}
+	sort.Strings(lanes)
+	writeJSON(w, http.StatusOK, map[string]any{"tasks": out, "order": order, "lanes": lanes})
+}
+
+// findByKey resolves {n} (number or slug fragment) in the project's ledger.
+func findByKey(projDir, key string) (task.Task, error) {
+	tasks, _, err := loadTasks(projDir)
+	if err != nil {
+		return task.Task{}, err
+	}
+	return task.Find(tasks, key)
+}
+
+// taskDetail returns one task plus its raw markdown body and the rendered
+// GFM html.
+func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	t, err := findByKey(projDir, r.PathValue("n"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	body, err := os.ReadFile(t.Path())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	var html bytes.Buffer
+	if err := markdown.Convert(body, &html); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"task": toJSON(t), "body": string(body), "html": html.String(),
+	})
+}
+
+// features returns the project's features with per-linked-task status chips.
+func (s *server) features(w http.ResponseWriter, r *http.Request) {
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	feats, err := store.LoadFeatures(projDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	tasks, _, err := loadTasks(projDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	byNum := map[int]task.Task{}
+	for _, t := range tasks {
+		if t.HasNum {
+			byNum[t.Num] = t
+		}
+	}
+	type chip struct {
+		Num    int    `json:"num"`
+		Status string `json:"status"`
+	}
+	type featJSON struct {
+		Slug  string `json:"slug"`
+		Done  bool   `json:"done"`
+		Title string `json:"title"`
+		HTML  string `json:"html"`
+		Tasks []chip `json:"tasks"`
+	}
+	out := []featJSON{}
+	for _, f := range feats {
+		fj := featJSON{Slug: f.Slug, Done: f.Done, Title: f.Title, Tasks: []chip{}}
+		if body, err := os.ReadFile(f.Path()); err == nil {
+			var html bytes.Buffer
+			if err := markdown.Convert(body, &html); err == nil {
+				fj.HTML = html.String()
+			}
+		}
+		for _, n := range f.Tasks {
+			c := chip{Num: n, Status: "missing"}
+			if t, ok := byNum[n]; ok {
+				c.Status = t.StatusLabel()
+			}
+			fj.Tasks = append(fj.Tasks, c)
+		}
+		out = append(out, fj)
+	}
+	writeJSON(w, http.StatusOK, out)
+}

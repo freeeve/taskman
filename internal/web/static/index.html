@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>taskman</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header>
+  <h1>taskman</h1>
+  <select id="project" title="project"></select>
+  <select id="lane" title="lane"><option value="">all lanes</option></select>
+  <label class="toggle"><input type="checkbox" id="show-deferred"> deferred</label>
+  <label class="toggle"><input type="checkbox" id="swimlanes"> swimlanes</label>
+</header>
+<main id="board"></main>
+<dialog id="task-dialog">
+  <div class="dialog-head">
+    <span id="dialog-file" class="mono"></span>
+    <button id="dialog-close" title="close">&#10005;</button>
+  </div>
+  <article id="dialog-body" class="md"></article>
+</dialog>
+<script src="/static/board.js"></script>
+</body>
+</html>

@@ -54,6 +54,8 @@ func run(args []string) error {
 		return cmdFeature(rest)
 	case "file":
 		return cmdFile(rest)
+	case "serve":
+		return cmdServe(rest)
 	case "fix", "doctor":
 		return cmdFix(rest)
 	case "projects":
@@ -103,6 +105,9 @@ Usage:
                                its next number, committed immediately
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
+  taskman serve [-addr host:port]
+                               kanban web app over the store (localhost only
+                               unless -insecure-bind; there is no auth)
   taskman migrate [-prune] <repo-dir> [project]
                                import a repo-local tasks/ ledger into the
                                store (empty project only); -prune removes the

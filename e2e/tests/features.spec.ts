@@ -1,0 +1,131 @@
+import { test, expect, type Page } from "@playwright/test";
+import { BASE_URL, PROJECT, gotoBoard, uniqueDesc } from "../helpers";
+
+/**
+ * Features view tests: tab switching, feature creation and shipping, and
+ * the duplicate-creation error. Features cannot be deleted through the API,
+ * so every test creates a uniquely-named feature; shipped and leftover
+ * features accumulate in the sandbox like done tasks do.
+ */
+
+const base = `${BASE_URL}/api/projects/${PROJECT}`;
+
+/** Switch to the features tab and wait for the view to render. */
+async function gotoFeatures(page: Page): Promise<void> {
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  await expect(page.locator("#features .features-bar")).toBeVisible();
+}
+
+/** Create a feature through the + feature prompt and return its card. */
+async function createFeatureViaUI(page: Page, description: string) {
+  page.once("dialog", (d) => d.accept(description));
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    page.locator("#features .features-bar button", { hasText: "+ feature" }).click(),
+  ]);
+  const card = page.locator(".feature-card", { hasText: description });
+  await expect(card).toBeVisible();
+  return card;
+}
+
+test("switching tabs shows exactly one view at a time", async ({ page }) => {
+  await gotoBoard(page);
+  await expect(page.locator("#board")).toBeVisible();
+  await expect(page.locator("#features")).toBeHidden();
+
+  await page.locator("#tab-features").click();
+  await expect(page.locator("#features")).toBeVisible();
+  await expect(page.locator("#board")).toBeHidden();
+  await expect(page.locator("#tab-features")).toHaveClass(/active/);
+
+  await page.locator("#tab-tasks").click();
+  await expect(page.locator("#board")).toBeVisible();
+  await expect(page.locator("#features")).toBeHidden();
+  await expect(page.locator("#tab-tasks")).toHaveClass(/active/);
+});
+
+test("the + feature button creates an active feature card", async ({ page }) => {
+  await gotoFeatures(page);
+  const desc = uniqueDesc("feature-create");
+  const card = await createFeatureViaUI(page, desc);
+  await expect(card.locator("h3")).toHaveText(desc);
+  await expect(card.locator(".feature-slug")).toContainText(".md");
+  await expect(card.locator("button", { hasText: "ship it" })).toBeVisible();
+
+  await card.locator("details summary").click();
+  await expect(card.locator(".md h1")).toHaveText(desc);
+  await expect(card.locator(".md")).toContainText("Tasks:");
+});
+
+test("creating a duplicate feature surfaces a clean already-exists error", async ({ page }) => {
+  await gotoFeatures(page);
+  const desc = uniqueDesc("feature-dup");
+  await createFeatureViaUI(page, desc);
+
+  const messages: string[] = [];
+  page.on("dialog", async (d) => {
+    if (d.type() === "prompt") await d.accept(desc);
+    else {
+      messages.push(d.message());
+      await d.dismiss();
+    }
+  });
+  await page.locator("#features .features-bar button", { hasText: "+ feature" }).click();
+  await expect.poll(() => messages.length).toBeGreaterThan(0);
+  expect(messages[0]).toMatch(/^feature ".+" already exists$/);
+  expect(messages[0]).not.toContain("/");
+});
+
+test("ship it marks the feature shipped and renames its file", async ({ page }) => {
+  await gotoFeatures(page);
+  const desc = uniqueDesc("feature-ship");
+  const card = await createFeatureViaUI(page, desc);
+
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    card.locator("button", { hasText: "ship it" }).click(),
+  ]);
+
+  const shipped = page.locator(".feature-card", { hasText: desc });
+  await expect(shipped.locator(".badge", { hasText: "shipped" })).toBeVisible();
+  await expect(shipped.locator(".feature-slug")).toContainText(".done.md");
+  await expect(shipped.locator("button", { hasText: "ship it" })).toHaveCount(0);
+
+  const feats = await (await page.request.get(`${base}/features`)).json();
+  const f = feats.find((x: { title: string }) => x.title === desc);
+  expect(f?.done).toBe(true);
+});
+
+test("the features API serves slug, done, title, html, and task chips", async ({ request }) => {
+  const res = await request.get(`${base}/features`);
+  expect(res.ok()).toBeTruthy();
+  const feats = await res.json();
+  expect(feats.length).toBeGreaterThan(0);
+  for (const f of feats) {
+    expect(f.slug).toMatch(/^[a-z0-9][a-z0-9-]*$/);
+    expect(typeof f.done).toBe("boolean");
+    expect(f.title.length).toBeGreaterThan(0);
+    expect(f.html).toContain("<h1");
+    expect(Array.isArray(f.tasks)).toBeTruthy();
+  }
+});
+
+test("shipping an already-shipped feature 409s cleanly", async ({ request }) => {
+  const desc = uniqueDesc("feature-reship");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+
+  expect((await request.post(`${base}/features/${slug}/done`)).ok()).toBeTruthy();
+  const again = await request.post(`${base}/features/${slug}/done`);
+  expect(again.status()).toBe(409);
+  expect((await again.json()).error).toContain("already");
+});

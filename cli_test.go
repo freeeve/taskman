@@ -264,6 +264,57 @@ func TestLanes(t *testing.T) {
 	}
 }
 
+// TestFeatures drives the feature CLI: template creation, the rollup against
+// the ledger, hiding shipped features, and the done rename.
+func TestFeatures(t *testing.T) {
+	home, _ := storeLedger(t, "featproj", "001_build-board.done.md", "002_wire-dnd.md")
+
+	if err := run([]string{"feature", "new", "Kanban board"}); err != nil {
+		t.Fatalf("feature new: %v", err)
+	}
+	path := filepath.Join(home, "featproj", "features", "kanban-board.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("feature file: %v", err)
+	}
+	if !strings.HasPrefix(string(data), "# Kanban board\n") || !strings.Contains(string(data), "Tasks:") {
+		t.Errorf("template:\n%s", data)
+	}
+	// Link the tasks (the documented flow: edit the Tasks: line).
+	linked := strings.Replace(string(data), "Tasks:", "Tasks: 001, 002", 1)
+	if err := os.WriteFile(path, []byte(linked), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := capture(t, func() { _ = run([]string{"feature", "list"}) })
+	if !strings.Contains(out, "kanban-board") || !strings.Contains(out, "1/2 tasks done") {
+		t.Errorf("feature list rollup:\n%s", out)
+	}
+
+	if err := run([]string{"feature", "done", "kanban"}); err != nil {
+		t.Fatalf("feature done: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "featproj", "features", "kanban-board.done.md")); err != nil {
+		t.Fatalf("done rename: %v", err)
+	}
+	out = capture(t, func() { _ = run([]string{"feature", "list"}) })
+	if strings.Contains(out, "kanban-board") {
+		t.Errorf("shipped feature must hide without -all:\n%s", out)
+	}
+	out = capture(t, func() { _ = run([]string{"feature", "list", "-all"}) })
+	if !strings.Contains(out, "kanban-board") || !strings.Contains(out, "done") {
+		t.Errorf("feature list -all:\n%s", out)
+	}
+	if log := git(t, home, "log", "--format=%s"); !strings.Contains(log, "chore(featproj): feature kanban-board") ||
+		!strings.Contains(log, "chore(featproj): feature done kanban-board") {
+		t.Errorf("feature commits:\n%s", log)
+	}
+
+	if err := run([]string{"feature", "bogus"}); err == nil {
+		t.Error("unknown feature subcommand must error")
+	}
+}
+
 // TestCmdFix drives the fix command end to end: dry-run changes nothing,
 // the real run repairs duplicates and leaves singles alone.
 func TestCmdFix(t *testing.T) {

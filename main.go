@@ -50,6 +50,8 @@ func run(args []string) error {
 		return cmdLane(rest)
 	case "adopt":
 		return cmdAdopt(rest)
+	case "feature":
+		return cmdFeature(rest)
 	case "file":
 		return cmdFile(rest)
 	case "fix", "doctor":
@@ -91,6 +93,11 @@ Usage:
                                the reason recorded in the task body
   taskman resume <n|slug>      lift a deferral, restoring the prior status
   taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
+  taskman feature new <description>
+                               create a feature spec in features/ (source of
+                               truth for what the product should do)
+  taskman feature list [-all]  features with a done-task rollup
+  taskman feature done <slug>  mark a feature shipped
   taskman file [-as filer] <project> <description>
                                file an ask into another project's ledger at
                                its next number, committed immediately

@@ -32,6 +32,10 @@
 
 * { box-sizing: border-box; }
 
+/* The board and features mains carry display rules that would otherwise
+   outrank the hidden attribute's UA default; hidden must always win. */
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
   background: var(--bg);

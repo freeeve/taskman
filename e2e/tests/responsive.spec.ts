@@ -185,6 +185,61 @@ test("a wide table in a feature spec scrolls in its own box, not the page", asyn
   ]);
 });
 
+test("a spec's long unbreakable inline content wraps and never scrolls the page", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // People paste long URLs and long code identifiers into specs. Unlike a wide
+  // table (its own scroll box), inline body text must break/wrap so it never
+  // widens the card or scrolls the page at mobile width -- a plausible CSS
+  // regression the title/table tests would not catch.
+  const res = await page.request.post(`${BASE_URL}/api/projects/${PROJECT}/features`, {
+    data: { description: `e2e long-inline ${Date.now()}` },
+  });
+  expect(res.status()).toBe(201);
+  const slug = (await res.json()).slug as string;
+
+  const url = "https://example.com/" + "a/very/long/unbreakable/path/segment".repeat(4) + "/1234567890";
+  const code = "aVeryLongInlineCodeIdentifierWithNoSpacesWhatsoeverToForceOverflowIfUnhandled";
+  appendFeatureBody(slug, `\n## refs\n\nSee ${url} and \`${code}\`.\n`);
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const cardSel = `.feature-card[data-slug="${slug}"]`;
+  await page.locator(`${cardSel} summary`).click();
+  await expect(page.locator(`${cardSel} .md`)).toContainText("refs");
+
+  for (const width of NARROW) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await hasHorizontalOverflow(page), `@${width}: horizontal overflow`).toBe(false);
+    // The spec body box itself stays within the viewport (content wrapped,
+    // not spilling past the right edge).
+    const within = await page.evaluate((sel) => {
+      const md = document.querySelector(`${sel} .md`) as HTMLElement;
+      const r = md.getBoundingClientRect();
+      return r.right <= window.innerWidth + 1 && r.left >= -1 && md.scrollWidth <= md.clientWidth + 1;
+    }, cardSel);
+    expect(within, `@${width}: spec body overflows its box`).toBe(true);
+  }
+
+  fs.rmSync(path.join(FEATURES_DIR, `${slug}.md`));
+  execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
+  execFileSync("git", [
+    "-C",
+    STORE,
+    "commit",
+    "-q",
+    "-m",
+    `chore(${PROJECT}): clean up long-inline responsive feature`,
+    "--",
+    `${PROJECT}/features`,
+  ]);
+});
+
 test("the project picker panel stays within a narrow viewport when open", async ({ page }) => {
   await gotoBoard(page);
   await page.setViewportSize({ width: 320, height: 900 });

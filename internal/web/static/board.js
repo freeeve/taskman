@@ -453,6 +453,15 @@ function focusTask(num) {
   $(onFeatures ? "#tab-features" : "#tab-tasks").focus();
 }
 
+// focusAfterRender lands keyboard focus on the first match of selector, or
+// of fallback when the target is gone -- for inline mutation controls whose
+// re-render destroyed the focused element (045 covered the dialog buttons;
+// this covers ship-it and the add buttons).
+function focusAfterRender(selector, fallback) {
+  const el = document.querySelector(selector) || document.querySelector(fallback);
+  if (el) el.focus();
+}
+
 // renderActions offers the lifecycle moves valid for the task's state; every
 // one goes through the same API (and commits) as a drag or a CLI call.
 function renderActions(t) {
@@ -488,7 +497,15 @@ function newTask() {
   const description = prompt("New task description:");
   if (!description || !description.trim()) return;
   const lane = state.lane;
-  mutate(() => post(`/api/projects/${state.project}/tasks`, { description: description.trim(), lane }));
+  let created = null;
+  mutate(async () => {
+    created = await post(`/api/projects/${state.project}/tasks`, {
+      description: description.trim(),
+      lane,
+    });
+  }).then(() => {
+    if (created) focusAfterRender(`#board [data-num="${created.num}"]`, "#new-task");
+  });
 }
 
 function wire() {

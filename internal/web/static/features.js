@@ -58,6 +58,9 @@ function featureCard(f, specOpen) {
     done.addEventListener("click", () =>
       post(`/api/projects/${state.project}/features/${f.slug}/done`)
         .then(loadFeatures)
+        .then(() =>
+          focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features")
+        )
         .catch((err) => alert(err.message || err))
     );
     head.append(done);
@@ -110,7 +113,14 @@ function renderFeatures(feats) {
     const description = prompt("New feature description:");
     if (!description || !description.trim()) return;
     post(`/api/projects/${state.project}/features`, { description: description.trim() })
-      .then(loadFeatures)
+      .then((created) =>
+        loadFeatures().then(() =>
+          focusAfterRender(
+            `#features [data-slug="${created.slug}"] summary`,
+            "#features .features-bar button"
+          )
+        )
+      )
       .catch((err) => alert(err.message || err));
   });
   bar.append(add);

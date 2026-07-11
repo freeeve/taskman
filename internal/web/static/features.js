@@ -63,6 +63,10 @@ function putFeatureTasks(f, nums) {
     .catch((err) => alert(err.message || err));
 }
 
+// openLinkPicker follows the project picker's combobox pattern: focus stays
+// in the filter input, arrows move the highlight, Enter toggles the
+// highlighted row, Escape closes; rows carry listbox/option roles so
+// assistive tech announces them.
 async function openLinkPicker(f, card) {
   closeLinkPanel();
   const data = await api(`/api/projects/${state.project}/tasks`);
@@ -72,35 +76,65 @@ async function openLinkPicker(f, card) {
   const search = document.createElement("input");
   search.type = "search";
   search.placeholder = "filter tasks...";
+  search.setAttribute("role", "combobox");
+  search.setAttribute("aria-expanded", "true");
   panel.append(search);
   const list = document.createElement("ul");
+  list.setAttribute("role", "listbox");
   panel.append(list);
+
+  let activeIdx = 0;
+  let matches = [];
+  const toggleNum = (num) => {
+    const current = f.tasks.map((c) => c.num);
+    putFeatureTasks(f, linked.has(num) ? current.filter((n) => n !== num) : [...current, num]);
+  };
   const renderRows = () => {
     const q = search.value.trim().toLowerCase();
+    matches = data.tasks.filter(
+      (t) => !q || `${String(t.num).padStart(3, "0")} ${t.title}`.toLowerCase().includes(q)
+    );
+    activeIdx = Math.min(activeIdx, Math.max(0, matches.length - 1));
     list.replaceChildren();
-    for (const t of data.tasks) {
-      const label = `${String(t.num).padStart(3, "0")} ${t.title}`;
-      if (q && !label.toLowerCase().includes(q)) continue;
+    matches.forEach((t, i) => {
       const li = document.createElement("li");
-      li.textContent = (linked.has(t.num) ? "✓ " : "") + label;
+      li.setAttribute("role", "option");
+      li.setAttribute("aria-selected", String(i === activeIdx));
+      li.textContent =
+        (linked.has(t.num) ? "✓ " : "") + `${String(t.num).padStart(3, "0")} ${t.title}`;
       if (linked.has(t.num)) li.classList.add("linked");
-      li.addEventListener("click", () => {
-        const current = f.tasks.map((c) => c.num);
-        putFeatureTasks(
-          f,
-          linked.has(t.num) ? current.filter((n) => n !== t.num) : [...current, t.num]
-        );
-      });
+      if (i === activeIdx) li.classList.add("active");
+      li.addEventListener("click", () => toggleNum(t.num));
       list.append(li);
-    }
-    if (!list.children.length) {
+    });
+    if (!matches.length) {
       const li = document.createElement("li");
       li.className = "dim";
       li.textContent = "no matching tasks";
       list.append(li);
     }
   };
-  search.addEventListener("input", renderRows);
+  search.addEventListener("input", () => {
+    activeIdx = 0;
+    renderRows();
+  });
+  search.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, matches.length - 1);
+      renderRows();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      renderRows();
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (matches[activeIdx]) toggleNum(matches[activeIdx].num);
+    } else if (e.key === "Escape") {
+      e.stopPropagation();
+      closeLinkPanel();
+    }
+  });
   renderRows();
   card.append(panel);
   linkPanel = panel;

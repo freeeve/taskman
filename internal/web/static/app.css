@@ -481,7 +481,7 @@ main#activity {
   font-size: 12.5px;
 }
 
-.link-panel li:hover { background: var(--surface-2); }
+.link-panel li:hover, .link-panel li.active { background: var(--surface-2); }
 .link-panel li.linked { color: var(--accent); }
 .link-panel li.dim { opacity: 0.55; cursor: default; }
 

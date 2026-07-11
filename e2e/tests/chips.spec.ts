@@ -190,3 +190,33 @@ test("an interactive chip is a focusable button and Enter opens the task", async
 
   await finishTask(page.request, t.num);
 });
+
+test("marking a deferred task done clears the deferral: the chip shows plain done", async ({
+  page,
+}) => {
+  const t = await createTaskViaAPI(page.request, uniqueDesc("chip-defer-done"));
+  await setStatusViaAPI(page.request, t.num, "in-progress");
+  await page.request.post(`${base}/tasks/${t.num}/defer`, { data: { reason: "chip defer-done" } });
+  const desc = uniqueDesc("chip-defer-done-feat");
+  const slug = await createFeature(page, desc);
+  linkTasksToFeature(slug, [t.num]);
+
+  await gotoBoard(page);
+  const card = await openFeature(page, desc);
+  const pad = String(t.num).padStart(3, "0");
+  await expect(card.locator(".chip", { hasText: pad })).toHaveClass(/in-progress-deferred/);
+
+  // Marking it done clears the deferral (SetStatus: acting on a task drops the
+  // held mark). A deferred task's dialog offers only "resume" and its card is
+  // undraggable, so the done move goes through the API. The chip must become a
+  // plain "done" -- never the unstyled, unreachable-by-design "done/deferred".
+  await setStatusViaAPI(page.request, t.num, "done");
+  await page.locator("#tab-tasks").click();
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const doneChip = page.locator(`.feature-card[data-slug="${slug}"] .chip`, { hasText: pad });
+  await expect(doneChip).toHaveClass(/chip done/);
+  await expect(doneChip).not.toContainText("deferred");
+});

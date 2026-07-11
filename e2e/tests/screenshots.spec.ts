@@ -88,6 +88,24 @@ test("rejects a non-image upload", async ({ request }) => {
   await finishTask(request, t.num);
 });
 
+test("rejects an SVG upload so a script-capable format is never stored or served", async ({
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("shot-svg"));
+  // The server sniffs the bytes (not the claimed mime), classifies SVG as xml,
+  // and rejects it -- SVG can carry <script>, so it must never enter the store
+  // where /shots/ would later serve it.
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`;
+  const res = await request.post(`${base}/tasks/${t.num}/screenshots`, {
+    multipart: {
+      file: { name: "x.svg", mimeType: "image/svg+xml", buffer: Buffer.from(svg) },
+    },
+  });
+  expect(res.status()).toBe(400);
+  expect((await res.json()).error).toContain("unsupported");
+  await finishTask(request, t.num);
+});
+
 test("the /shots/ route refuses dotfiles and unknown files", async ({ request }) => {
   const dot = await request.get(`${BASE_URL}/shots/${PROJECT}/1/.hidden`);
   expect(dot.status()).toBe(404);

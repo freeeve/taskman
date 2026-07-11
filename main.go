@@ -112,6 +112,8 @@ Usage:
   taskman feature done <slug>  mark a feature shipped
   taskman feature reopen <slug>
                                un-ship a feature (back to active)
+  taskman feature rm <slug>    discard a feature spec (linked tasks stay;
+                               the removal commit makes it undoable)
   taskman file [-as filer] <project> <description>
                                file an ask into another project's ledger at
                                its next number, committed immediately; the

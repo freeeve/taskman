@@ -518,6 +518,30 @@ func TestAPIFeatureMutations(t *testing.T) {
 	if code := send(t, srv, "POST", "/api/projects/myproj/features/nope/reopen", nil, nil); code != 404 {
 		t.Errorf("missing feature reopen status %d", code)
 	}
+
+	// Delete discards the spec (linked tasks untouched), commits once, and
+	// project undo restores it.
+	if code := send(t, srv, "DELETE", "/api/projects/myproj/features/kanban", nil, nil); code != 204 {
+		t.Fatalf("delete status %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(home, "myproj", "features", "kanban.md")); err == nil {
+		t.Error("feature file must be removed")
+	}
+	if _, err := os.Stat(filepath.Join(home, "myproj", "tasks", "001_ship-it.done.md")); err != nil {
+		t.Errorf("linked task must survive the delete: %v", err)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): remove feature kanban" {
+		t.Errorf("delete commit = %q", s)
+	}
+	if code := send(t, srv, "DELETE", "/api/projects/myproj/features/kanban", nil, nil); code != 404 {
+		t.Errorf("re-delete status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/undo", nil, nil); code != 200 {
+		t.Fatalf("undo of delete failed")
+	}
+	if _, err := os.Stat(filepath.Join(home, "myproj", "features", "kanban.md")); err != nil {
+		t.Errorf("undo must restore the deleted feature: %v", err)
+	}
 }
 
 // TestConcurrentMutationsAllCommitted pins the API's audit-trail contract

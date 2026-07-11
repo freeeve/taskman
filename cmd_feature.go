@@ -29,9 +29,44 @@ func cmdFeature(args []string) error {
 		return cmdFeatureSetDone(args[1:], true)
 	case "reopen":
 		return cmdFeatureSetDone(args[1:], false)
+	case "rm", "remove":
+		return cmdFeatureRm(args[1:])
 	default:
-		return fmt.Errorf("unknown feature subcommand %q (new|list|done|reopen)", args[0])
+		return fmt.Errorf("unknown feature subcommand %q (new|list|done|reopen|rm)", args[0])
 	}
+}
+
+// cmdFeatureRm discards a feature spec (active or shipped) and commits the
+// removal; linked tasks stay untouched, and the commit makes the discard
+// undoable.
+func cmdFeatureRm(args []string) error {
+	fs := flag.NewFlagSet("feature rm", flag.ContinueOnError)
+	noCommit := fs.Bool("no-commit", false, "skip the git commit")
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: taskman feature rm [-p project] [-no-commit] <slug>")
+	}
+	p, err := openProject(*project)
+	if err != nil {
+		return err
+	}
+	features, err := store.LoadFeatures(filepath.Dir(p.Dir))
+	if err != nil {
+		return err
+	}
+	f, err := findFeature(features, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if err := f.Remove(); err != nil {
+		return err
+	}
+	fmt.Printf("removed %s\n", f.File)
+	p.commit(*noCommit, "remove feature "+f.Slug, f.Path())
+	return nil
 }
 
 // cmdFeatureNew creates and commits a feature spec from the template.

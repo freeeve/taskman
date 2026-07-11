@@ -143,6 +143,11 @@ func (f Feature) SetTasks(nums []int) (Feature, error) {
 	return nf, nil
 }
 
+// Remove deletes the feature's spec file. Linked tasks are independent
+// files and stay untouched; the removal is one commit, so project undo
+// restores a mistaken discard.
+func (f Feature) Remove() error { return os.Remove(f.Path()) }
+
 // SetDone renames the feature to its shipped (or, for false, active) form.
 // It refuses to rename onto an existing file: os.Rename replaces its
 // destination silently, and the destination here is another feature's spec.

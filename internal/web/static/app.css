@@ -557,12 +557,29 @@ main#activity {
   white-space: nowrap;
 }
 
+.feature-slug-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 2px 0 8px;
+}
+
 .feature-slug {
   font-size: 11px;
   color: var(--text-dim);
-  margin: 2px 0 8px;
   overflow-wrap: anywhere;
 }
+
+.discard-btn {
+  font-size: 11px;
+  padding: 0 6px;
+  color: var(--text-dim);
+  background: none;
+  border-color: transparent;
+}
+
+.discard-btn:hover { color: var(--deferred); border-color: var(--deferred); }
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 

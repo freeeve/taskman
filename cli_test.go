@@ -358,6 +358,24 @@ func TestFeatures(t *testing.T) {
 	if err := run([]string{"feature", "done", "kanban"}); err != nil {
 		t.Errorf("exact slug must win over fragment matches: %v", err)
 	}
+
+	// rm discards (shipped features included); ambiguity and misses refuse.
+	if err := run([]string{"feature", "rm", "kanban-"}); err == nil ||
+		!strings.Contains(err.Error(), "ambiguous") {
+		t.Errorf("ambiguous rm = %v", err)
+	}
+	if err := run([]string{"feature", "rm", "nope"}); err == nil {
+		t.Error("missing feature rm must error")
+	}
+	if err := run([]string{"feature", "rm", "kanban-tablet"}); err != nil {
+		t.Fatalf("feature rm: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "featproj", "features", "kanban-tablet.md")); err == nil {
+		t.Error("rm must remove the file")
+	}
+	if log := git(t, home, "log", "-1", "--format=%s"); !strings.Contains(log, "remove feature kanban-tablet") {
+		t.Errorf("rm commit = %q", log)
+	}
 }
 
 // TestDecisionFlow drives the interactive-decision CLI end to end: pose via

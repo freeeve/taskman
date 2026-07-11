@@ -550,6 +550,32 @@ func (s *server) editTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toJSON(t))
 }
 
+// deleteFeature handles DELETE features/{slug}: discard the spec file
+// (active or shipped) with one scoped removal commit -- undoable via the
+// project undo. Linked tasks are independent files and stay untouched.
+func (s *server) deleteFeature(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	f, err := findFeatureSlug(projDir, r.PathValue("slug"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	if err := f.Remove(); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !s.commitOK(w, r.PathValue("p"), "remove feature "+f.Slug, f.Path()) {
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
 // undoable reports whether a commit subject is one this store minted for the
 // project (a taskman mutation or a previous undo of one); anything else --
 // hand commits, seeds, other tools -- is not ours to revert.

@@ -227,10 +227,28 @@ function featureCard(f, specOpen) {
   }
   el.append(head);
 
-  const slug = document.createElement("div");
+  const slugRow = document.createElement("div");
+  slugRow.className = "feature-slug-row";
+  const slug = document.createElement("span");
   slug.className = "feature-slug mono";
   slug.textContent = f.slug + (f.done ? ".done" : "") + ".md";
-  el.append(slug);
+  slugRow.append(slug);
+  // Discard lives on the slug row, deliberately away from ship it, and is
+  // confirm-guarded; the removal is one commit, so undo restores it.
+  const discard = document.createElement("button");
+  discard.type = "button";
+  discard.className = "discard-btn";
+  discard.textContent = "discard";
+  discard.title = "delete this feature spec (linked tasks are not deleted)";
+  discard.addEventListener("click", () => {
+    if (!confirm(`Discard "${f.title}"? Its linked tasks are not deleted.`)) return;
+    api(`/api/projects/${state.project}/features/${f.slug}`, { method: "DELETE" })
+      .then(loadFeatures)
+      .then(() => focusAfterRender("#features .features-bar button", "#tab-features"))
+      .catch((err) => alert(err.message || err));
+  });
+  slugRow.append(discard);
+  el.append(slugRow);
 
   if (f.tasks.length) {
     const chips = document.createElement("div");

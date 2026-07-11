@@ -207,8 +207,19 @@ main#board {
 
 .card.deferred { opacity: 0.65; }
 
+/* The arrow stack lives out of flow in a reserved right gutter: inside the
+   meta row it inflated the row to the stack's height and shoved the title
+   down. Vertically centered against the whole card. */
+.card:has(.priority-controls) {
+  position: relative;
+  padding-right: 34px;
+}
+
 .card .priority-controls {
-  margin-left: auto;
+  position: absolute;
+  top: 50%;
+  right: 6px;
+  transform: translateY(-50%);
   display: flex;
   flex-direction: column;
   gap: 2px;

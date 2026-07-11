@@ -113,6 +113,38 @@ test("selecting the sandbox switches the board and persists across reload", asyn
   expect(await page.locator("#project").inputValue()).toBe(PROJECT);
 });
 
+test("switching projects while on the features tab stays on features and reloads it", async ({
+  page,
+}) => {
+  // The features map is per-project. Selecting a different project from the
+  // features tab must keep you on that tab and refetch for the new project --
+  // not silently drop back to the board (features.js keeps featuresVisible and
+  // reloads on the #project change event).
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  await expect(page.locator("#tab-features")).toHaveClass(/active/);
+
+  // Pick any other project in the store (don't hard-code the set).
+  const projects: { name: string }[] = await (await page.request.get("/api/projects")).json();
+  const other = projects.map((p) => p.name).find((n) => n !== PROJECT);
+  expect(other, "store should hold a second project to switch to").toBeTruthy();
+
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${other}/features`)),
+    selectProjectViaPicker(page, other as string),
+  ]);
+
+  // Still on features, showing the new project -- board never surfaced.
+  await expect(page.locator("#tab-features")).toHaveClass(/active/);
+  await expect(page.locator("#features")).toBeVisible();
+  await expect(page.locator("#board")).toBeHidden();
+  await expect(page.locator("#features .features-bar")).toBeVisible();
+  await expect(page.locator("#project-button")).toContainText(other as string);
+});
+
 test("a stale project in localStorage falls back to a real project and still loads", async ({
   page,
 }) => {

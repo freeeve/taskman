@@ -50,9 +50,11 @@ type taskJSON struct {
 	Title    string `json:"title"`
 }
 
-// writeJSON emits v with the proper content type.
+// writeJSON emits v with the proper content type. no-store keeps browsers
+// from heuristically caching ledger state that other writers change.
 func writeJSON(w http.ResponseWriter, code int, v any) {
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	w.WriteHeader(code)
 	_ = json.NewEncoder(w).Encode(v)
 }

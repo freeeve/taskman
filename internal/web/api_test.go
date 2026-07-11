@@ -130,6 +130,14 @@ func TestAPIProjects(t *testing.T) {
 		Open     int    `json:"open"`
 		Deferred int    `json:"deferred"`
 	}
+	res, err := http.Get(srv.URL + "/api/projects")
+	if err != nil {
+		t.Fatal(err)
+	}
+	res.Body.Close()
+	if cc := res.Header.Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store (multi-writer store must not be cached)", cc)
+	}
 	if code := get(t, srv, "/api/projects", &projects); code != 200 {
 		t.Fatalf("status %d", code)
 	}

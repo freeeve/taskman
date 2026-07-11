@@ -571,6 +571,51 @@ function wire() {
   $("#new-task").addEventListener("click", newTask);
 }
 
+// --- external-change freshness: the store is multi-writer (CLI and other
+// sessions commit too), so an open tab refetches when it regains focus.
+// One refetch per transition (focus + visibilitychange fire together), and
+// never under an open dialog -- the refresh runs on its close instead.
+// Scroll, open spec panels (renderFeatures), and a focused card survive.
+let refreshQueued = false;
+let refreshOnDialogClose = false;
+
+async function refreshStale() {
+  if (refreshQueued) return;
+  refreshQueued = true;
+  setTimeout(() => {
+    refreshQueued = false;
+  }, 300);
+  if ($("#task-dialog").open) {
+    refreshOnDialogClose = true;
+    return;
+  }
+  const active = document.activeElement;
+  const num = active && active.dataset ? active.dataset.num : null;
+  const y = window.scrollY;
+  await loadTasks().catch(showError);
+  if (typeof featuresVisible !== "undefined" && featuresVisible) {
+    await loadFeatures().catch(showError);
+  }
+  window.scrollTo(0, y);
+  if (num) {
+    const el = document.querySelector(`[data-num="${num}"]`);
+    if (el) el.focus();
+  }
+}
+
+function wireRefresh() {
+  window.addEventListener("focus", refreshStale);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshStale();
+  });
+  $("#task-dialog").addEventListener("close", () => {
+    if (refreshOnDialogClose) {
+      refreshOnDialogClose = false;
+      refreshStale();
+    }
+  });
+}
+
 function showError(err) {
   const board = $("#board");
   board.replaceChildren();
@@ -583,6 +628,7 @@ function showError(err) {
 wire();
 wirePicker();
 wireScreenshots();
+wireRefresh();
 loadProjects()
   .then(loadTasks)
   .catch(showError);

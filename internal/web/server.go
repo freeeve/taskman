@@ -30,6 +30,7 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/status", s.setStatus)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/defer", s.deferTask)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/resume", s.resumeTask)
+	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/answer", s.answerDecision)
 	mux.HandleFunc("PUT /api/projects/{p}/order", s.setOrder)
 	mux.HandleFunc("POST /api/projects/{p}/features", s.createFeature)
 	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/done", s.featureDone)

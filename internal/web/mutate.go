@@ -199,7 +199,9 @@ func (s *server) deferTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toJSON(nt))
 }
 
-// resumeTask handles POST tasks/{n}/resume.
+// resumeTask handles POST tasks/{n}/resume. A live decision must be answered
+// through the answer route, never silently dropped by a plain resume --
+// same contract as the CLI.
 func (s *server) resumeTask(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -213,12 +215,105 @@ func (s *server) resumeTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
+	if body, err := os.ReadFile(t.Path()); err == nil {
+		if _, live := task.ParseDecision(string(body)); live {
+			writeErr(w, http.StatusConflict,
+				fmt.Errorf("this task has an unanswered decision; answer it instead of resuming"))
+			return
+		}
+	}
 	nt, err := t.Resume(today())
 	if err != nil {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
 	if !s.commitOK(w, r.PathValue("p"), "resume "+nt.Stem(), t.Path(), nt.Path()) {
+		return
+	}
+	writeJSON(w, http.StatusOK, toJSON(nt))
+}
+
+// answerDecision handles POST tasks/{n}/answer: {"choice"} picks a labelled
+// option, {"other"} answers free-text when allowed. Answering records the
+// choice in the body, lifts the deferral, and promotes the task to the top
+// of the priority order -- one scoped commit.
+func (s *server) answerDecision(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req struct {
+		Choice string `json:"choice"`
+		Other  string `json:"other"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	t, err := findByKey(projDir, r.PathValue("n"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	body, err := os.ReadFile(t.Path())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	d, live := task.ParseDecision(string(body))
+	if !live {
+		if task.HasAnsweredDecision(string(body)) {
+			writeErr(w, http.StatusConflict, fmt.Errorf("this decision was already answered"))
+			return
+		}
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("this task has no unanswered decision"))
+		return
+	}
+	chosen, note := strings.TrimSpace(req.Choice), strings.TrimSpace(req.Other)
+	switch {
+	case chosen != "":
+		valid := false
+		for _, opt := range d.Options {
+			if opt.Label == chosen {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("%q is not one of the options", chosen))
+			return
+		}
+	case note != "":
+		if !d.AllowOther {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("this decision does not allow a free-text answer"))
+			return
+		}
+		chosen = "Other"
+	default:
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("pass a choice or a free-text other"))
+		return
+	}
+	if err := t.AnswerDecision(chosen, note, today()); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	nt := t
+	if t.Deferred {
+		if nt, err = t.Resume(today()); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	op, err := store.PromoteToTop(projDir, nt.Num)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !s.commitOK(w, r.PathValue("p"),
+		fmt.Sprintf("answer decision on %s (%s)", nt.Stem(), chosen), t.Path(), nt.Path(), op) {
 		return
 	}
 	writeJSON(w, http.StatusOK, toJSON(nt))

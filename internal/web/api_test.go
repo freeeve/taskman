@@ -835,6 +835,127 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestDecisionAPI drives the structured-question flow over HTTP: the flag
+// and parsed payload surface, plain resume refuses, answering validates,
+// records, un-defers, promotes to top-of-order, and stale answers 409.
+func TestDecisionAPI(t *testing.T) {
+	home, srv := testStore(t)
+	dir := filepath.Join(home, "myproj", "tasks")
+
+	// Pose a decision on the deferred fixture task (004_held.deferred.md).
+	block := "\n```decision\nquestion: Inline or queue?\noptions:\n- label: Inline\n  explain: simpler\n- label: Queue\n  explain: durable\nallow_other: true\n```\n"
+	path := filepath.Join(dir, "004_held.deferred.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(body, []byte(block)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// The list flags it; the detail carries the parsed decision.
+	var list struct {
+		Tasks []struct {
+			Num         int  `json:"num"`
+			HasDecision bool `json:"has_decision"`
+		} `json:"tasks"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks", &list); code != 200 {
+		t.Fatal("list failed")
+	}
+	found := false
+	for _, tk := range list.Tasks {
+		if tk.Num == 4 && tk.HasDecision {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("has_decision flag missing: %+v", list.Tasks)
+	}
+	var detail struct {
+		Decision *struct {
+			Question   string `json:"question"`
+			AllowOther bool   `json:"allow_other"`
+			Options    []struct {
+				Label   string `json:"label"`
+				Explain string `json:"explain"`
+			} `json:"options"`
+		} `json:"decision"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/4", &detail); code != 200 {
+		t.Fatal("detail failed")
+	}
+	if detail.Decision == nil || detail.Decision.Question != "Inline or queue?" ||
+		len(detail.Decision.Options) != 2 || detail.Decision.Options[1].Explain != "durable" {
+		t.Fatalf("decision payload = %+v", detail.Decision)
+	}
+
+	// Plain resume refuses while the decision is live.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/resume", nil, nil); code != 409 {
+		t.Errorf("plain resume status %d", code)
+	}
+	// Bad label and empty answers 400.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/answer",
+		map[string]string{"choice": "Nope"}, nil); code != 400 {
+		t.Errorf("bad label status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/answer",
+		map[string]string{}, nil); code != 400 {
+		t.Errorf("empty answer status %d", code)
+	}
+
+	// Answering records, un-defers, and jumps the order.
+	var answered struct {
+		Deferred bool   `json:"deferred"`
+		File     string `json:"file"`
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/answer",
+		map[string]string{"choice": "Queue"}, &answered); code != 200 {
+		t.Fatalf("answer status %d", code)
+	}
+	if answered.Deferred || answered.File != "004_held.md" {
+		t.Errorf("answered task = %+v", answered)
+	}
+	after, _ := os.ReadFile(filepath.Join(dir, "004_held.md"))
+	if !strings.Contains(string(after), "chosen: Queue") ||
+		!strings.Contains(string(after), "```decision answered") {
+		t.Errorf("answered record:\n%s", after)
+	}
+	order, _ := os.ReadFile(filepath.Join(home, "myproj", "order"))
+	if !strings.Contains(string(order), "004\n002") {
+		t.Errorf("answered decision must lead the order:\n%s", order)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): answer decision on 004_held (Queue)" {
+		t.Errorf("answer commit = %q", s)
+	}
+	// Stale answer 409s; a task with no decision 400s.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/answer",
+		map[string]string{"choice": "Inline"}, nil); code != 409 {
+		t.Errorf("stale answer status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/answer",
+		map[string]string{"choice": "x"}, nil); code != 400 {
+		t.Errorf("no-decision answer status %d", code)
+	}
+
+	// Free-text Other records the note.
+	block2 := "\n```decision\nquestion: Name it?\noptions:\n- label: alpha\n- label: beta\n```\n"
+	p2 := filepath.Join(dir, "002_build-board.md")
+	b2, _ := os.ReadFile(p2)
+	if err := os.WriteFile(p2, append(b2, []byte(block2)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/answer",
+		map[string]string{"other": "call it gamma"}, nil); code != 200 {
+		t.Fatalf("other answer failed")
+	}
+	after, _ = os.ReadFile(p2)
+	if !strings.Contains(string(after), "chosen: Other") ||
+		!strings.Contains(string(after), "note: call it gamma") {
+		t.Errorf("other record:\n%s", after)
+	}
+}
+
 // TestSearchAPI pins the global search route: cross-project hits with
 // context, rebuild on HEAD movement, and clean handling of empty queries.
 func TestSearchAPI(t *testing.T) {

@@ -96,13 +96,34 @@ var markdown = goldmark.New(goldmark.WithExtensions(extension.GFM))
 
 // taskJSON is the wire shape of one task.
 type taskJSON struct {
-	Num      int    `json:"num"`
-	Lane     string `json:"lane"`
-	Slug     string `json:"slug"`
-	Status   string `json:"status"`
-	Deferred bool   `json:"deferred"`
-	File     string `json:"file"`
-	Title    string `json:"title"`
+	Num         int    `json:"num"`
+	Lane        string `json:"lane"`
+	Slug        string `json:"slug"`
+	Status      string `json:"status"`
+	Deferred    bool   `json:"deferred"`
+	File        string `json:"file"`
+	Title       string `json:"title"`
+	HasDecision bool   `json:"has_decision"`
+}
+
+// decisionJSON is the wire shape of a live structured question.
+type decisionJSON struct {
+	Question   string       `json:"question"`
+	Options    []optionJSON `json:"options"`
+	AllowOther bool         `json:"allow_other"`
+}
+
+type optionJSON struct {
+	Label   string `json:"label"`
+	Explain string `json:"explain"`
+}
+
+func toDecisionJSON(d task.Decision) *decisionJSON {
+	dj := &decisionJSON{Question: d.Question, AllowOther: d.AllowOther, Options: []optionJSON{}}
+	for _, opt := range d.Options {
+		dj.Options = append(dj.Options, optionJSON{Label: opt.Label, Explain: opt.Explain})
+	}
+	return dj
 }
 
 // writeJSON emits v with the proper content type. no-store keeps browsers
@@ -166,29 +187,31 @@ func loadTasks(projDir string) ([]task.Task, []int, error) {
 // titleRE strips the ledger's "NNN -- " H1 prefix for display.
 var titleRE = regexp.MustCompile(`^#\s*(?:\d+\s*(?:--|\x{2014}|\x{2013}| - )\s*)?`)
 
-// title returns the task's H1 with the number prefix stripped, falling back
+// title returns the body's H1 with the number prefix stripped, falling back
 // to the slug.
-func title(t task.Task) string {
-	data, err := os.ReadFile(t.Path())
-	if err != nil {
-		return t.Slug
-	}
-	line, _, _ := strings.Cut(string(data), "\n")
+func title(body, fallback string) string {
+	line, _, _ := strings.Cut(body, "\n")
 	if !strings.HasPrefix(line, "# ") {
-		return t.Slug
+		return fallback
 	}
 	if s := strings.TrimSpace(titleRE.ReplaceAllString(line, "")); s != "" {
 		return s
 	}
-	return t.Slug
+	return fallback
 }
 
-// toJSON converts a ledger task to its wire shape.
+// toJSON converts a ledger task to its wire shape, reading the body once for
+// both the display title and the live-decision flag.
 func toJSON(t task.Task) taskJSON {
-	return taskJSON{
+	out := taskJSON{
 		Num: t.Num, Lane: t.Lane, Slug: t.Slug, Status: t.Status.String(),
-		Deferred: t.Deferred, File: t.File, Title: title(t),
+		Deferred: t.Deferred, File: t.File, Title: t.Slug,
 	}
+	if data, err := os.ReadFile(t.Path()); err == nil {
+		out.Title = title(string(data), t.Slug)
+		_, out.HasDecision = task.ParseDecision(string(data))
+	}
+	return out
 }
 
 // activity lists recent commits touching the project, newest first: the
@@ -327,8 +350,12 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	var dj *decisionJSON
+	if d, live := task.ParseDecision(string(body)); live {
+		dj = toDecisionJSON(d)
+	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"task": toJSON(t), "body": string(body), "html": rendered,
+		"task": toJSON(t), "body": string(body), "html": rendered, "decision": dj,
 	})
 }
 

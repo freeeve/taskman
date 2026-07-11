@@ -65,6 +65,19 @@ export function appendFeatureBody(slug: string, markdown: string): void {
   commitFeatureFile(slug);
 }
 
+/**
+ * Append markdown to a task's body on disk, then commit so the store tree
+ * stays clean. The API cannot edit task bodies, so specs that need rich body
+ * content (tables, links) write the file directly. Only valid when
+ * storeIsLocal(); pass the task's `file` from its wire shape.
+ */
+export function appendTaskBody(file: string, markdown: string): void {
+  const rel = `${PROJECT}/tasks/${file}`;
+  fs.appendFileSync(path.join(STORE, PROJECT, "tasks", file), markdown);
+  execFileSync("git", ["-C", STORE, "add", "--", rel]);
+  execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): e2e task body edit`, "--", rel]);
+}
+
 /** Title prefix of the baseline fixture tasks created by global setup. */
 export const SEED_PREFIX = "seed: ";
 

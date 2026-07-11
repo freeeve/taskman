@@ -103,6 +103,47 @@ export function appendTaskBody(file: string, markdown: string): void {
   execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): e2e task body edit`, "--", rel]);
 }
 
+/**
+ * Path to a taskman binary able to pose structured decisions. A decision is
+ * posed only through the CLI (`defer -question -option ...`); the web API
+ * defers with a reason only. Prefer $TASKMAN_BIN, else the repo's freshly
+ * built `bin/taskman` (what `serve` runs), else `taskman` on PATH.
+ */
+export function taskmanBin(): string {
+  if (process.env.TASKMAN_BIN) return process.env.TASKMAN_BIN;
+  const repoBin = path.join(__dirname, "..", "bin", "taskman");
+  return fs.existsSync(repoBin) ? repoBin : "taskman";
+}
+
+/**
+ * True when the resolved taskman binary understands `defer -question`, so a
+ * decision spec can pose its precondition. Gates specs on a current CLI (an
+ * installed binary predating the decisions feature lacks the flag).
+ */
+export function decisionPoseSupported(): boolean {
+  try {
+    return execFileSync(taskmanBin(), ["defer", "-h"], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).includes(
+      "question"
+    );
+  } catch (e) {
+    // `defer -h` exits non-zero after printing usage to stderr; inspect it.
+    const out = (e as { stderr?: string; stdout?: string }).stderr ?? (e as { stdout?: string }).stdout ?? "";
+    return out.includes("question");
+  }
+}
+
+/**
+ * Pose a structured decision on a task via the CLI, deferring it. Options are
+ * `"Label::explanation"` pairs. Only valid when storeIsLocal() and
+ * decisionPoseSupported(); the mutation auto-commits into the store.
+ */
+export function poseDecision(num: number, question: string, options: string[]): void {
+  const args = ["defer", "-question", question];
+  for (const o of options) args.push("-option", o);
+  args.push("-p", PROJECT, String(num));
+  execFileSync(taskmanBin(), args, { encoding: "utf8" });
+}
+
 /** Title prefix of the baseline fixture tasks created by global setup. */
 export const SEED_PREFIX = "seed: ";
 

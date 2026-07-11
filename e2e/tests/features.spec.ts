@@ -391,3 +391,45 @@ test("the + task button on a feature creates a task already linked to it", async
 
   await finishTask(request, num);
 });
+
+test("the link picker is keyboard-operable: filter then Enter links the task (task 087)", async ({
+  page,
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  const t = await createTaskViaAPI(request, uniqueDesc("kbdlink-task"));
+  const created = await request.post(`${base}/features`, {
+    data: { description: uniqueDesc("kbdlink-feat") },
+  });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  const pad = String(t.num).padStart(3, "0");
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await card.locator("button.link-btn").click();
+
+  const panel = card.locator(".link-panel");
+  // Focus lands in the filter and the list announces itself as a listbox.
+  await expect(panel.locator("input")).toBeFocused();
+  await expect(panel.locator("ul")).toHaveAttribute("role", "listbox");
+
+  // Filter to the task and link it with Enter -- no mouse touches the row.
+  // Before task 087 this linked nothing; now it toggles the highlighted option.
+  await panel.locator("input").fill(pad);
+  await expect(panel.locator("li[role=option]").first()).toContainText(pad);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/features/${slug}/tasks`) && r.request().method() === "PUT"
+    ),
+    panel.locator("input").press("Enter"),
+  ]);
+  await expect(card.locator(".chip", { hasText: pad })).toContainText("pending");
+
+  await finishTask(request, t.num);
+});

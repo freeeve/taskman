@@ -8,7 +8,9 @@ import {
   PROJECT,
   STORE,
   appendFeatureBody,
+  createTaskViaAPI,
   gotoBoard,
+  linkTasksToFeature,
   storeIsLocal,
 } from "../helpers";
 
@@ -74,6 +76,12 @@ test("a feature with a long unbreakable-word title stays within narrow viewports
   expect(res.status()).toBe(201);
   const slug = (await res.json()).slug as string;
 
+  // Link a task so the head also carries the done-task rollup (task 061): the
+  // head is then title + rollup + ship-it, its busiest layout, which is what
+  // must survive the narrow width -- not just a bare title + button.
+  const linked = await createTaskViaAPI(page.request, `e2e rollup-long ${Date.now()}`);
+  linkTasksToFeature(slug, [linked.num]);
+
   await gotoBoard(page);
   await Promise.all([
     page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
@@ -81,18 +89,28 @@ test("a feature with a long unbreakable-word title stays within narrow viewports
   ]);
   const cardSel = `.feature-card[data-slug="${slug}"]`;
   await expect(page.locator(cardSel)).toBeVisible();
+  await expect(page.locator(`${cardSel} .rollup`)).toBeVisible();
+
+  const offscreen = (sel: string) =>
+    page.evaluate((s) => {
+      const within = (el: Element | null) => {
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.right <= window.innerWidth + 1 && r.left >= -1;
+      };
+      return {
+        button: !within(document.querySelector(`${s} .feature-head button`)),
+        rollup: !within(document.querySelector(`${s} .rollup`)),
+      };
+    }, sel);
 
   for (const width of NARROW) {
     await page.setViewportSize({ width, height: 900 });
     expect(await hasHorizontalOverflow(page), `@${width}: horizontal overflow`).toBe(false);
-    // The ship-it button must stay reachable within the viewport.
-    const btnOffscreen = await page.evaluate((sel) => {
-      const btn = document.querySelector(`${sel} .feature-head button`);
-      if (!btn) return true;
-      const r = btn.getBoundingClientRect();
-      return r.right > window.innerWidth + 1 || r.left < -1;
-    }, cardSel);
-    expect(btnOffscreen, `@${width}: ship-it button off-screen`).toBe(false);
+    // The ship-it button and the rollup must both stay within the viewport.
+    const off = await offscreen(cardSel);
+    expect(off.button, `@${width}: ship-it button off-screen`).toBe(false);
+    expect(off.rollup, `@${width}: rollup off-screen`).toBe(false);
   }
 
   // Clean up the probe feature so the sandbox stays lean.

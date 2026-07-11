@@ -73,7 +73,18 @@ func Commit(dir, msg string, paths []string) error {
 		return err
 	}
 	commit := append([]string{"-C", dir, "commit", "-q", "-m", msg, "--"}, known...)
-	return gitRetry("commit", commit)
+	if err := gitRetry("commit", commit); err != nil {
+		// Racing mutations can leave this pathspec with nothing uncommitted
+		// (a concurrent commit already captured the state, or a rename made
+		// the pathspec stale). A clean pathspec satisfies the
+		// every-mutation-committed contract, so it is success, not failure.
+		if strings.Contains(err.Error(), "nothing to commit") ||
+			strings.Contains(err.Error(), "nothing added to commit") {
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // AutoCommit commits task-file paths unless disabled, downgrading git

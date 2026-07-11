@@ -50,15 +50,30 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeErr emits the API's uniform error shape. Filesystem errors are
-// reduced to the basename first: the absolute store path is server detail,
-// not something a browser client should see.
+// writeErr emits the API's uniform error shape, with filesystem detail
+// stripped first.
 func writeErr(w http.ResponseWriter, code int, err error) {
+	writeJSON(w, code, map[string]string{"error": sanitizeErr(err).Error()})
+}
+
+// sanitizeErr reduces every os error class to basenames: the absolute store
+// path is server detail, not something a browser client should see. Renames
+// (os.LinkError) are the common mutation failure -- every status, defer,
+// resume, and ship is one.
+func sanitizeErr(err error) error {
 	var pe *os.PathError
 	if errors.As(err, &pe) {
-		err = fmt.Errorf("%s %s: %v", pe.Op, filepath.Base(pe.Path), pe.Err)
+		return fmt.Errorf("%s %s: %v", pe.Op, filepath.Base(pe.Path), pe.Err)
 	}
-	writeJSON(w, code, map[string]string{"error": err.Error()})
+	var le *os.LinkError
+	if errors.As(err, &le) {
+		return fmt.Errorf("%s %s -> %s: %v", le.Op, filepath.Base(le.Old), filepath.Base(le.New), le.Err)
+	}
+	var se *os.SyscallError
+	if errors.As(err, &se) {
+		return fmt.Errorf("%s: %v", se.Syscall, se.Err)
+	}
+	return err
 }
 
 // projDir validates the {p} path segment and returns the project directory.

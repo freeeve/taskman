@@ -670,15 +670,27 @@ func TestAPIErrorPaths(t *testing.T) {
 	}
 }
 
-// TestWriteErrSanitizesPathErrors pins the catch-all: any *os.PathError that
-// slips through (permissions, disk full, ...) loses its directory before
-// reaching the client.
-func TestWriteErrSanitizesPathErrors(t *testing.T) {
-	rec := httptest.NewRecorder()
-	writeErr(rec, 400, &os.PathError{Op: "open", Path: "/abs/store/dir/file.md", Err: os.ErrPermission})
-	body := rec.Body.String()
-	if !strings.Contains(body, "file.md") || strings.Contains(body, "/abs/store") {
-		t.Errorf("sanitized error = %q", body)
+// TestWriteErrSanitizesOSErrors pins the catch-all: every os error class
+// (open failures, rename failures, raw syscalls) loses its directories
+// before reaching the client. Renames matter most -- every status, defer,
+// resume, and ship mutation is one.
+func TestWriteErrSanitizesOSErrors(t *testing.T) {
+	cases := map[string]error{
+		"path": &os.PathError{Op: "open", Path: "/abs/store/dir/file.md", Err: os.ErrPermission},
+		"link": &os.LinkError{Op: "rename", Old: "/abs/store/dir/a.md",
+			New: "/abs/store/dir/a.done.md", Err: os.ErrNotExist},
+		"syscall": os.NewSyscallError("flock", os.ErrInvalid),
+	}
+	for name, in := range cases {
+		rec := httptest.NewRecorder()
+		writeErr(rec, 400, in)
+		body := rec.Body.String()
+		if strings.Contains(body, "/abs/store") {
+			t.Errorf("%s: error leaks the store path: %q", name, body)
+		}
+		if name == "link" && (!strings.Contains(body, "a.md") || !strings.Contains(body, "a.done.md")) {
+			t.Errorf("link: basenames missing: %q", body)
+		}
 	}
 }
 

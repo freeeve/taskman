@@ -200,6 +200,29 @@ func TestConcurrentCommits(t *testing.T) {
 	}
 }
 
+// TestCommitCleanPathspecIsSuccess pins the race tolerance: committing a
+// pathspec whose state is already fully committed (a concurrent mutation
+// got there first) is success, not an error surfaced to the client.
+func TestCommitCleanPathspecIsSuccess(t *testing.T) {
+	home := testHome(t)
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(home, "f.txt")
+	if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(home, "chore(store): first", []string{path}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(home, "chore(store): nothing new", []string{path}); err != nil {
+		t.Errorf("clean pathspec must be success: %v", err)
+	}
+	if count := gitOut(t, home, "rev-list", "--count", "HEAD"); count != "2" {
+		t.Errorf("commit count = %s, want 2 (seed + first)", count)
+	}
+}
+
 // TestCommitRetriesIndexLock pins the shared-store contract: a transient
 // index.lock held by another process delays a commit instead of failing it.
 func TestCommitRetriesIndexLock(t *testing.T) {

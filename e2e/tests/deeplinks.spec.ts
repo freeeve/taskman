@@ -99,3 +99,34 @@ test("a feature deep link with a second panel open does not loop the hash (task 
   const hash = await page.evaluate(() => location.hash);
   expect(hash).toMatch(new RegExp(`/feature/(${slugA}|${slugB})$`));
 });
+
+test("opening a task from a feature chip deep-links to it, and Back restores the features view (task 092)", async ({
+  page,
+  request,
+}) => {
+  // Opening a task over the features tab must set the task hash (shareable,
+  // and Back closes the dialog) -- not leave it on /features. Regression for
+  // the currentHash() ordering where the tab view masked the open dialog.
+  const t = await createTaskViaAPI(request, uniqueDesc("dl-chip"));
+  const slug = await makeFeature(request, "dl-chip-feat");
+  expect((await request.put(`${base}/features/${slug}/tasks`, { data: { tasks: [t.num] } })).ok()).toBeTruthy();
+
+  await page.goto(`/#/p/${PROJECT}/features`);
+  const chip = page.locator(`.feature-card[data-slug="${slug}"] button.chip`).first();
+  await expect(chip).toBeVisible();
+  await chip.click();
+
+  // The dialog opens and the hash reflects the task, so the URL is shareable.
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect
+    .poll(() => page.evaluate(() => location.hash))
+    .toBe(`#/p/${PROJECT}/task/${t.num}`);
+
+  // Back closes the dialog and returns to the features view it was opened over.
+  await page.goBack();
+  await expect(page.locator("#task-dialog")).toBeHidden();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe(`#/p/${PROJECT}/features`);
+
+  await request.delete(`${base}/features/${slug}`);
+  await finishTask(request, t.num);
+});

@@ -117,6 +117,11 @@ test("ship it marks the feature shipped and renames its file", async ({ page }) 
 });
 
 test("the features API serves slug, done, title, html, and task chips", async ({ request }) => {
+  // Self-provision so this holds on a freshly-pruned sandbox (global teardown
+  // removes accumulated features), not just when earlier specs left some.
+  const seed = await request.post(`${base}/features`, { data: { description: uniqueDesc("api-shape") } });
+  expect(seed.status()).toBe(201);
+
   const res = await request.get(`${base}/features`);
   expect(res.ok()).toBeTruthy();
   const feats = await res.json();

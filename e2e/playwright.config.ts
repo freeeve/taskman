@@ -12,6 +12,7 @@ import { BASE_URL } from "./helpers";
 export default defineConfig({
   testDir: "./tests",
   globalSetup: "./global-setup",
+  globalTeardown: "./global-teardown",
   fullyParallel: false,
   workers: 1,
   retries: 0,

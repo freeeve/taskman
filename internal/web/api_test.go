@@ -415,6 +415,24 @@ func TestAPIFeatureMutations(t *testing.T) {
 	if code := send(t, srv, "POST", "/api/projects/myproj/features/nope/done", nil, nil); code != 404 {
 		t.Errorf("missing feature status %d", code)
 	}
+
+	// Ship is reversible: reopen renames back, commits, and 409s when the
+	// feature is not shipped.
+	if code := send(t, srv, "POST", "/api/projects/myproj/features/search-everything/reopen", nil, nil); code != 200 {
+		t.Fatalf("reopen status %d", code)
+	}
+	if _, err := os.Stat(filepath.Join(home, "myproj", "features", "search-everything.md")); err != nil {
+		t.Fatalf("reopen rename: %v", err)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): feature reopen search-everything" {
+		t.Errorf("reopen commit = %q", s)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features/search-everything/reopen", nil, nil); code != 409 {
+		t.Errorf("re-reopen status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/features/nope/reopen", nil, nil); code != 404 {
+		t.Errorf("missing feature reopen status %d", code)
+	}
 }
 
 // TestConcurrentMutationsAllCommitted pins the API's audit-trail contract

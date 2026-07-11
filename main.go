@@ -100,6 +100,8 @@ Usage:
                                truth for what the product should do)
   taskman feature list [-all]  features with a done-task rollup
   taskman feature done <slug>  mark a feature shipped
+  taskman feature reopen <slug>
+                               un-ship a feature (back to active)
   taskman file [-as filer] <project> <description>
                                file an ask into another project's ledger at
                                its next number, committed immediately

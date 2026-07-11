@@ -26,9 +26,11 @@ func cmdFeature(args []string) error {
 	case "list", "ls":
 		return cmdFeatureList(args[1:])
 	case "done":
-		return cmdFeatureDone(args[1:])
+		return cmdFeatureSetDone(args[1:], true)
+	case "reopen":
+		return cmdFeatureSetDone(args[1:], false)
 	default:
-		return fmt.Errorf("unknown feature subcommand %q (new|list|done)", args[0])
+		return fmt.Errorf("unknown feature subcommand %q (new|list|done|reopen)", args[0])
 	}
 }
 
@@ -112,16 +114,22 @@ func cmdFeatureList(args []string) error {
 	return nil
 }
 
-// cmdFeatureDone marks a feature shipped and commits the rename.
-func cmdFeatureDone(args []string) error {
-	fs := flag.NewFlagSet("feature done", flag.ContinueOnError)
+// cmdFeatureSetDone moves a feature between active and shipped (done, and
+// its reverse reopen -- an accidental ship must be recoverable) and commits
+// the rename.
+func cmdFeatureSetDone(args []string, done bool) error {
+	verb := "done"
+	if !done {
+		verb = "reopen"
+	}
+	fs := flag.NewFlagSet("feature "+verb, flag.ContinueOnError)
 	noCommit := fs.Bool("no-commit", false, "skip the git commit")
 	project := fs.String("p", "", "project name (default: resolved from the current directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: taskman feature done [-p project] [-no-commit] <slug>")
+		return fmt.Errorf("usage: taskman feature %s [-p project] [-no-commit] <slug>", verb)
 	}
 	p, err := openProject(*project)
 	if err != nil {
@@ -135,15 +143,19 @@ func cmdFeatureDone(args []string) error {
 	if err != nil {
 		return err
 	}
-	if f.Done {
-		return fmt.Errorf("%s is already done", f.File)
+	if f.Done == done {
+		state := "already done"
+		if !done {
+			state = "not shipped"
+		}
+		return fmt.Errorf("%s is %s", f.File, state)
 	}
-	nf, err := f.SetDone(true)
+	nf, err := f.SetDone(done)
 	if err != nil {
 		return err
 	}
 	fmt.Printf("%s -> %s\n", f.File, nf.File)
-	p.commit(*noCommit, "feature done "+nf.Slug, f.Path(), nf.Path())
+	p.commit(*noCommit, fmt.Sprintf("feature %s %s", verb, nf.Slug), f.Path(), nf.Path())
 	return nil
 }
 

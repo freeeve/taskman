@@ -47,22 +47,29 @@ function featureCard(f, specOpen) {
   const title = document.createElement("h3");
   title.textContent = f.title;
   head.append(title);
+  const shipAction = (route) => () =>
+    post(`/api/projects/${state.project}/features/${f.slug}/${route}`)
+      .then(loadFeatures)
+      .then(() =>
+        focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features")
+      )
+      .catch((err) => alert(err.message || err));
   if (f.done) {
     const badge = document.createElement("span");
     badge.className = "badge";
     badge.textContent = "shipped";
     head.append(badge);
+    const unship = document.createElement("button");
+    unship.textContent = "unship";
+    unship.addEventListener("click", shipAction("reopen"));
+    head.append(unship);
   } else {
     const done = document.createElement("button");
     done.textContent = "ship it";
-    done.addEventListener("click", () =>
-      post(`/api/projects/${state.project}/features/${f.slug}/done`)
-        .then(loadFeatures)
-        .then(() =>
-          focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features")
-        )
-        .catch((err) => alert(err.message || err))
-    );
+    done.addEventListener("click", () => {
+      if (!confirm(`Ship "${f.title}"?`)) return;
+      shipAction("done")();
+    });
     head.append(done);
   }
   el.append(head);

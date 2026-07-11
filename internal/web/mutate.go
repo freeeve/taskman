@@ -261,6 +261,17 @@ func (s *server) createFeature(w http.ResponseWriter, r *http.Request) {
 
 // featureDone handles POST features/{slug}/done.
 func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
+	s.featureSetDone(w, r, true)
+}
+
+// featureReopen handles POST features/{slug}/reopen: the un-ship path, so an
+// accidental one-click ship is recoverable in-product.
+func (s *server) featureReopen(w http.ResponseWriter, r *http.Request) {
+	s.featureSetDone(w, r, false)
+}
+
+// featureSetDone moves a feature between active and shipped.
+func (s *server) featureSetDone(w http.ResponseWriter, r *http.Request, done bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
@@ -278,15 +289,23 @@ func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	verb := "feature done "
+	if !done {
+		verb = "feature reopen "
+	}
 	for _, f := range feats {
 		if f.Slug != slug {
 			continue
 		}
-		if f.Done {
-			writeErr(w, http.StatusConflict, fmt.Errorf("%s is already done", f.File))
+		if f.Done == done {
+			state := "already done"
+			if !done {
+				state = "not shipped"
+			}
+			writeErr(w, http.StatusConflict, fmt.Errorf("%s is %s", f.File, state))
 			return
 		}
-		nf, err := f.SetDone(true)
+		nf, err := f.SetDone(done)
 		if err != nil {
 			code := http.StatusInternalServerError
 			if strings.Contains(err.Error(), "refusing to overwrite") {
@@ -295,10 +314,10 @@ func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, code, err)
 			return
 		}
-		if !s.commitOK(w, r.PathValue("p"), "feature done "+nf.Slug, f.Path(), nf.Path()) {
+		if !s.commitOK(w, r.PathValue("p"), verb+nf.Slug, f.Path(), nf.Path()) {
 			return
 		}
-		writeJSON(w, http.StatusOK, map[string]any{"slug": nf.Slug, "done": true})
+		writeJSON(w, http.StatusOK, map[string]any{"slug": nf.Slug, "done": done})
 		return
 	}
 	writeErr(w, http.StatusNotFound, fmt.Errorf("no feature %q", slug))

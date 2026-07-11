@@ -31,6 +31,7 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("PUT /api/projects/{p}/order", s.setOrder)
 	mux.HandleFunc("POST /api/projects/{p}/features", s.createFeature)
 	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/done", s.featureDone)
+	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/reopen", s.featureReopen)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/screenshots", s.uploadScreenshot)
 	mux.HandleFunc("GET /shots/{p}/{n}/{file}", s.serveScreenshot)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))

@@ -310,6 +310,20 @@ func TestFeatures(t *testing.T) {
 		t.Errorf("feature commits:\n%s", log)
 	}
 
+	// Shipping is reversible from the CLI too.
+	if err := run([]string{"feature", "reopen", "kanban-board"}); err != nil {
+		t.Fatalf("feature reopen: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "featproj", "features", "kanban-board.md")); err != nil {
+		t.Fatalf("reopen rename: %v", err)
+	}
+	if err := run([]string{"feature", "reopen", "kanban-board"}); err == nil {
+		t.Error("reopening an active feature must error")
+	}
+	if err := run([]string{"feature", "done", "kanban-board"}); err != nil {
+		t.Fatalf("re-ship after reopen: %v", err)
+	}
+
 	if err := run([]string{"feature", "bogus"}); err == nil {
 		t.Error("unknown feature subcommand must error")
 	}

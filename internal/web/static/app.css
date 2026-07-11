@@ -346,6 +346,13 @@ main#features {
   overflow-wrap: anywhere;
 }
 
+.rollup {
+  color: var(--text-dim);
+  font-size: 11px;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
 .feature-slug {
   font-size: 11px;
   color: var(--text-dim);

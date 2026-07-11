@@ -47,6 +47,15 @@ function featureCard(f, specOpen) {
   const title = document.createElement("h3");
   title.textContent = f.title;
   head.append(title);
+  if (f.tasks.length) {
+    // Same rollup as `taskman feature list`: done over ALL linked numbers
+    // (missing tasks count in the denominator there too).
+    const done = f.tasks.filter((c) => c.status === "done").length;
+    const rollup = document.createElement("span");
+    rollup.className = "rollup";
+    rollup.textContent = `${done}/${f.tasks.length} tasks done`;
+    head.append(rollup);
+  }
   const shipAction = (route) => () =>
     post(`/api/projects/${state.project}/features/${f.slug}/${route}`)
       .then(loadFeatures)

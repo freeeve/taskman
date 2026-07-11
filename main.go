@@ -104,7 +104,9 @@ Usage:
                                un-ship a feature (back to active)
   taskman file [-as filer] <project> <description>
                                file an ask into another project's ledger at
-                               its next number, committed immediately
+                               its next number, committed immediately; the
+                               target is a bare project name (libcat), never
+                               a path
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
   taskman serve [-addr host:port]

@@ -78,10 +78,18 @@ func EnsureProject(home, project string) (string, error) {
 // the TASKMAN_PROJECT environment variable (how a session pins itself to a
 // project), the enclosing git repo's basename, and finally the cwd basename.
 // The result is slugified so directory names and project names never drift.
+//
+// A path is refused rather than slugified: the pre-store `taskman file
+// <repo-dir>` habit dies hard, and silently mangling ~/libcat into a junk
+// "users-efreeman-libcat" project has misfiled real asks more than once.
 func Resolve(flagVal string) (string, error) {
 	name := flagVal
 	if name == "" {
 		name = os.Getenv("TASKMAN_PROJECT")
+	}
+	if strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, "~") || strings.HasPrefix(name, ".") {
+		return "", fmt.Errorf("project %q looks like a path; pass a bare project name (e.g. %q)",
+			name, filepath.Base(strings.TrimRight(name, `/\`)))
 	}
 	if name == "" {
 		if out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output(); err == nil {

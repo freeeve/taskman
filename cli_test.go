@@ -138,6 +138,15 @@ func TestCommands(t *testing.T) {
 	if err := run([]string{"file", "otherproj", "Please fix the flux capacitor"}); err == nil {
 		t.Error("re-filing the same ask must refuse to overwrite")
 	}
+	// A repo path as the target is refused, not slugified into a junk
+	// project (the pre-store `file <repo-dir>` habit).
+	if err := run([]string{"file", "~/otherproj", "Misfiled ask"}); err == nil ||
+		!strings.Contains(err.Error(), "bare project name") {
+		t.Errorf("file with a path target = %v, want refusal", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "otherproj-misfile")); err == nil {
+		t.Error("no junk project may be created for a path target")
+	}
 
 	// Legacy prefixed asks still adopt, addressed cross-project via -p.
 	legacy := filepath.Join(home, "otherproj", "tasks", "qbd_old-style-ask.md")

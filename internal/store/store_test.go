@@ -140,6 +140,21 @@ func TestResolvePrecedence(t *testing.T) {
 	if _, err := Resolve("---"); err == nil {
 		t.Error("unslugifiable name must error")
 	}
+
+	// Paths are refused, not slugified into junk projects: the pre-store
+	// `file <repo-dir>` habit misfiled real asks (users-efreeman-libcat).
+	for _, bad := range []string{"~/libcat", "/Users/x/libcat", "./libcat", "..", `..\win`, "sub/dir"} {
+		if _, err := Resolve(bad); err == nil ||
+			!strings.Contains(err.Error(), "bare project name") {
+			t.Errorf("Resolve(%q) = %v, want path refusal", bad, err)
+		}
+	}
+	// The env var is guarded too.
+	t.Setenv("TASKMAN_PROJECT", "~/libcat")
+	if _, err := Resolve(""); err == nil {
+		t.Error("path in TASKMAN_PROJECT must be refused")
+	}
+	t.Setenv("TASKMAN_PROJECT", "")
 }
 
 func TestProjects(t *testing.T) {

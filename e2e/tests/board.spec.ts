@@ -83,6 +83,19 @@ test("clicking a card opens the detail dialog with rendered markdown", async ({ 
   await expect(page.locator("#task-dialog")).toBeHidden();
 });
 
+test("a board card is a focusable role=button and Enter opens its detail", async ({ page }) => {
+  const seed = await taskByTitle(page.request, SEEDS.pendingWeb);
+  const el = card(page, seed.num);
+  await expect(el).toHaveAttribute("role", "button");
+  await expect(el).toHaveAttribute("tabindex", "0");
+
+  await el.focus();
+  await expect(el).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect(page.locator("#dialog-file")).toHaveText(seed.file);
+});
+
 test("the dialog offers the lifecycle actions valid for the task's state", async ({
   page,
 }) => {

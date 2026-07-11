@@ -97,7 +97,7 @@ for (const id of ["#tab-tasks", "#tab-features", "#tab-activity"]) {
 // Spec panel toggles: non-bubbling, so capture. Only genuine user toggles
 // win the hash -- rebuild-fired toggles (renderFeatures recreating open
 // panels) are suppressed via renderingFeatures, or they feedback-loop with
-// applyHash's re-render (task 086).
+// applyHash's re-render.
 document.addEventListener(
   "toggle",
   (e) => {

@@ -540,9 +540,9 @@ function focusTask(num) {
 }
 
 // focusAfterRender lands keyboard focus on the first match of selector, or
-// of fallback when the target is gone -- for inline mutation controls whose
-// re-render destroyed the focused element (045 covered the dialog buttons;
-// this covers ship-it and the add buttons).
+// of fallback when the target is gone -- for inline mutation controls (ship,
+// unship, the add buttons) whose re-render destroyed the focused element;
+// the dialog action buttons restore focus through focusTask instead.
 function focusAfterRender(selector, fallback) {
   const el = document.querySelector(selector) || document.querySelector(fallback);
   if (el) el.focus();

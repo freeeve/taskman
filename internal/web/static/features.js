@@ -255,9 +255,9 @@ function featureCard(f, specOpen) {
 
 // renderingFeatures suppresses the router's toggle listener during rebuilds:
 // recreating an open <details> fires a toggle, and with 2+ open panels those
-// rebuild toggles would rewrite the hash, whose hashchange re-renders --
-// a ping-pong loop (task 086). Toggle events are queued as tasks, so the
-// flag clears on a queued task too, after every rebuild toggle has fired.
+// rebuild toggles would rewrite the hash, whose hashchange re-renders -- a
+// ping-pong loop. Toggle events are queued as tasks, so the flag clears on a
+// queued task too, after every rebuild toggle has fired.
 let renderingFeatures = false;
 
 function renderFeatures(feats) {

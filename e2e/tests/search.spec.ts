@@ -97,3 +97,42 @@ test("the header search box lists results as you type", async ({ page, request }
 
   await finishTask(request, t.num);
 });
+
+test("clicking a task search result deep-links to and opens that task", async ({ page, request }) => {
+  const tok = token("clicktask");
+  const t = await createTaskViaAPI(request, `click ${tok}`);
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/search")),
+    page.locator("#search").fill(tok),
+  ]);
+  await page.locator("#search-results .search-row", { hasText: tok }).click();
+
+  await expect(page).toHaveURL(new RegExp(`#/p/${PROJECT}/task/${t.num}$`));
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect(page.locator("#task-dialog")).toContainText(tok);
+
+  await finishTask(request, t.num);
+});
+
+test("clicking a feature search result deep-links to and opens that spec panel", async ({
+  page,
+  request,
+}) => {
+  const tok = token("clickfeat");
+  const created = await request.post(`${base}/features`, { data: { description: `click ${tok}` } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/search")),
+    page.locator("#search").fill(tok),
+  ]);
+  await page.locator("#search-results .search-row", { hasText: tok }).click();
+
+  await expect(page).toHaveURL(new RegExp(`#/p/${PROJECT}/feature/${slug}$`));
+  await expect(page.locator("#tab-features")).toHaveClass(/active/);
+  await expect(page.locator(`.feature-card[data-slug="${slug}"] details[open]`)).toHaveCount(1);
+});

@@ -338,6 +338,30 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+// TestCheckSlug pins up-front length validation: creation must fail with a
+// clean message before the filesystem gets to reject the name.
+func TestCheckSlug(t *testing.T) {
+	if err := CheckSlug(""); err == nil {
+		t.Error("empty slug must be rejected")
+	}
+	if err := CheckSlug(strings.Repeat("a", MaxSlugLen)); err != nil {
+		t.Errorf("slug at the limit must pass: %v", err)
+	}
+	if err := CheckSlug(strings.Repeat("a", MaxSlugLen+1)); err == nil ||
+		!strings.Contains(err.Error(), "too long") {
+		t.Errorf("over-long slug error = %v", err)
+	}
+
+	dir := ledger(t)
+	if _, err := New(dir, nil, strings.Repeat("a", 300), "", "2026-07-10"); err == nil ||
+		!strings.Contains(err.Error(), "too long") || strings.Contains(err.Error(), dir) {
+		t.Errorf("New over-long = %v (must be clean, no path)", err)
+	}
+	if entries, _ := os.ReadDir(dir); len(entries) != 0 {
+		t.Error("no file may be created for a rejected description")
+	}
+}
+
 func FuzzSlugify(f *testing.F) {
 	f.Add("Full-corpus NQ export!")
 	f.Add("---")

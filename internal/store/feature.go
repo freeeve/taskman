@@ -65,8 +65,8 @@ func LoadFeatures(projDir string) ([]Feature, error) {
 // it; the description keeps its human form in the title.
 func NewFeature(projDir, desc, date string) (Feature, error) {
 	slug := task.Slugify(desc)
-	if slug == "" {
-		return Feature{}, fmt.Errorf("description %q yields an empty slug", desc)
+	if err := task.CheckSlug(slug); err != nil {
+		return Feature{}, err
 	}
 	dir := FeaturesDir(projDir)
 	if err := os.MkdirAll(dir, 0o755); err != nil {

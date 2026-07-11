@@ -121,8 +121,11 @@ func cmdFile(args []string) error {
 	}
 	filer = task.Slugify(filer)
 	slug := task.Slugify(desc)
-	if filer == "" || slug == "" {
-		return fmt.Errorf("empty filer or slug (filer %q, description %q)", filer, desc)
+	if filer == "" {
+		return fmt.Errorf("empty filer (pass -as or run inside a project)")
+	}
+	if err := task.CheckSlug(slug); err != nil {
+		return err
 	}
 	p, err := openProject(rest[0])
 	if err != nil {

@@ -640,6 +640,22 @@ func TestAPIErrorPaths(t *testing.T) {
 		}
 	}
 
+	// Over-long descriptions fail validation up front with a clean message;
+	// no absolute store path may reach the client (generalizing task 017).
+	long := strings.Repeat("a", 300)
+	var lengthErr struct {
+		Error string `json:"error"`
+	}
+	for _, path := range []string{"/api/projects/myproj/tasks", "/api/projects/myproj/features"} {
+		if code := send(t, srv, "POST", path,
+			map[string]string{"description": long}, &lengthErr); code != 400 {
+			t.Errorf("over-long create on %s = %d, want 400", path, code)
+		}
+		if !strings.Contains(lengthErr.Error, "too long") || strings.Contains(lengthErr.Error, "/") {
+			t.Errorf("over-long error on %s = %q (must be clean, no path)", path, lengthErr.Error)
+		}
+	}
+
 	// State conflicts 409: resuming an undeferred task, deferring a done one.
 	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/resume", nil, nil); code != 409 {
 		t.Errorf("resume undeferred = %d, want 409", code)
@@ -651,6 +667,18 @@ func TestAPIErrorPaths(t *testing.T) {
 	// Resume of a deferred task via slug key works (Find accepts fragments).
 	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/held/resume", nil, nil); code != 200 {
 		t.Errorf("resume by slug = %d", code)
+	}
+}
+
+// TestWriteErrSanitizesPathErrors pins the catch-all: any *os.PathError that
+// slips through (permissions, disk full, ...) loses its directory before
+// reaching the client.
+func TestWriteErrSanitizesPathErrors(t *testing.T) {
+	rec := httptest.NewRecorder()
+	writeErr(rec, 400, &os.PathError{Op: "open", Path: "/abs/store/dir/file.md", Err: os.ErrPermission})
+	body := rec.Body.String()
+	if !strings.Contains(body, "file.md") || strings.Contains(body, "/abs/store") {
+		t.Errorf("sanitized error = %q", body)
 	}
 }
 

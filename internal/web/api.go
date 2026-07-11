@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -49,8 +50,14 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 	_ = json.NewEncoder(w).Encode(v)
 }
 
-// writeErr emits the API's uniform error shape.
+// writeErr emits the API's uniform error shape. Filesystem errors are
+// reduced to the basename first: the absolute store path is server detail,
+// not something a browser client should see.
 func writeErr(w http.ResponseWriter, code int, err error) {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		err = fmt.Errorf("%s %s: %v", pe.Op, filepath.Base(pe.Path), pe.Err)
+	}
 	writeJSON(w, code, map[string]string{"error": err.Error()})
 }
 

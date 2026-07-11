@@ -139,13 +139,31 @@ func Slugify(desc string) string {
 	return b.String()
 }
 
+// MaxSlugLen bounds a slug so the full basename -- number, lane, the longest
+// status suffixes, extension -- stays comfortably under the common 255-byte
+// filename limit, and the failure is a clean validation error instead of a
+// platform-specific ENAMETOOLONG from the filesystem.
+const MaxSlugLen = 200
+
+// CheckSlug rejects slugs that cannot become filenames: empty (nothing
+// slugifiable in the description) or over MaxSlugLen.
+func CheckSlug(slug string) error {
+	if slug == "" {
+		return fmt.Errorf("description yields an empty slug")
+	}
+	if len(slug) > MaxSlugLen {
+		return fmt.Errorf("description too long: slug is %d bytes (max %d)", len(slug), MaxSlugLen)
+	}
+	return nil
+}
+
 // New creates the next numbered pending task in dir with the standard body,
 // returning it. The lane must already be slugified (or empty); desc keeps its
 // human form in the title.
 func New(dir string, tasks []Task, desc, lane, date string) (Task, error) {
 	slug := Slugify(desc)
-	if slug == "" {
-		return Task{}, fmt.Errorf("description %q yields an empty slug", desc)
+	if err := CheckSlug(slug); err != nil {
+		return Task{}, err
 	}
 	t := Task{Dir: dir, Num: NextNum(tasks), HasNum: true, Slug: slug, Lane: lane}
 	t.File = t.Name()

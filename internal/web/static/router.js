@@ -17,12 +17,16 @@ function parseHash() {
 
 // currentHash mirrors the live view; feature-panel state is written by the
 // toggle listener below rather than derived (several panels may be open).
+// The open dialog is checked first: it is a modal over whichever tab is
+// behind it, so its URL wins -- a task opened from a feature chip must be as
+// deep-linkable as one opened from a board card, and closing falls back to
+// the tab's hash via the dialog's close listener.
 function currentHash() {
   if (!state.project) return "";
   const base = `#/p/${state.project}`;
+  if ($("#task-dialog").open && state.dialogTask != null) return `${base}/task/${state.dialogTask}`;
   if (typeof activityVisible !== "undefined" && activityVisible) return base + "/activity";
   if (typeof featuresVisible !== "undefined" && featuresVisible) return base + "/features";
-  if ($("#task-dialog").open && state.dialogTask != null) return `${base}/task/${state.dialogTask}`;
   return base;
 }
 

@@ -176,6 +176,7 @@ async function loadTasks() {
   if (!state.project) return;
   const data = await api(`/api/projects/${state.project}/tasks`);
   state.tasks = data.tasks;
+  updateDecisionsPill();
   const sel = $("#lane");
   const current = state.lane;
   sel.replaceChildren(new Option("all lanes", ""));
@@ -335,7 +336,12 @@ function card(t) {
     lane.textContent = t.lane;
     meta.append(lane);
   }
-  if (t.deferred) {
+  if (t.has_decision) {
+    const dec = document.createElement("span");
+    dec.className = "badge decision";
+    dec.textContent = "decision needed";
+    meta.append(dec);
+  } else if (t.deferred) {
     const def = document.createElement("span");
     def.className = "badge deferred";
     def.textContent = "deferred";
@@ -432,8 +438,65 @@ async function openTask(num) {
   state.dialogData = data;
   $("#dialog-file").textContent = data.task.file;
   $("#dialog-body").innerHTML = data.html;
+  if (data.decision) renderDecision(data.task, data.decision);
   renderActions(data.task);
   $("#task-dialog").showModal();
+}
+
+// renderDecision puts the structured question at the top of the dialog,
+// mirroring an agent's option prompt: the question, one button per option
+// with its explanation beneath the label, and a free-text Other when
+// allowed. Answering returns the task to pending at the top of the queue.
+function renderDecision(t, d) {
+  const box = document.createElement("div");
+  box.className = "decision-box";
+  const q = document.createElement("div");
+  q.className = "decision-question";
+  q.textContent = d.question;
+  box.append(q);
+
+  const answer = (payload) => {
+    $("#task-dialog").close();
+    mutate(() => post(`/api/projects/${state.project}/tasks/${t.num}/answer`, payload)).then(() =>
+      focusTask(t.num)
+    );
+  };
+  for (const opt of d.options) {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "decision-option";
+    const label = document.createElement("strong");
+    label.textContent = opt.label;
+    btn.append(label);
+    if (opt.explain) {
+      const explain = document.createElement("span");
+      explain.className = "decision-explain";
+      explain.textContent = opt.explain;
+      btn.append(explain);
+    }
+    btn.addEventListener("click", () => answer({ choice: opt.label }));
+    box.append(btn);
+  }
+  if (d.allow_other) {
+    const row = document.createElement("div");
+    row.className = "decision-other";
+    const input = document.createElement("input");
+    input.placeholder = "other...";
+    row.append(input);
+    const go = document.createElement("button");
+    go.type = "button";
+    go.textContent = "answer";
+    const submit = () => {
+      if (input.value.trim()) answer({ other: input.value.trim() });
+    };
+    go.addEventListener("click", submit);
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") submit();
+    });
+    row.append(go);
+    box.append(row);
+  }
+  $("#dialog-body").prepend(box);
 }
 
 // renderEditor swaps the dialog into edit mode: title input + raw markdown
@@ -569,7 +632,11 @@ function renderActions(t) {
 
   const status = (s) => () => post(`/api/projects/${state.project}/tasks/${t.num}/status`, { status: s });
   if (t.deferred) {
-    act("resume", () => post(`/api/projects/${state.project}/tasks/${t.num}/resume`));
+    // A live decision is answered through its option buttons above, never
+    // silently resumed past.
+    if (!t.has_decision) {
+      act("resume", () => post(`/api/projects/${state.project}/tasks/${t.num}/resume`));
+    }
     return;
   }
   if (t.status === "pending") act("start", status("in-progress"));
@@ -582,6 +649,16 @@ function renderActions(t) {
       return post(`/api/projects/${state.project}/tasks/${t.num}/defer`, { reason: reason.trim() });
     });
   }
+}
+
+// updateDecisionsPill surfaces the count of unanswered decisions in the
+// header so they are findable without hunting the deferred filter; clicking
+// it turns the deferred toggle on so the badged cards show.
+function updateDecisionsPill() {
+  const pill = $("#decisions-pill");
+  const count = state.tasks.filter((t) => t.has_decision).length;
+  pill.hidden = count === 0;
+  pill.textContent = count === 1 ? "1 decision" : `${count} decisions`;
 }
 
 // undoLast reverts the project's newest taskman commit after showing the
@@ -634,6 +711,11 @@ function wire() {
   wireLightDismiss();
   $("#new-task").addEventListener("click", newTask);
   $("#undo").addEventListener("click", undoLast);
+  $("#decisions-pill").addEventListener("click", () => {
+    state.showDeferred = true;
+    $("#show-deferred").checked = true;
+    render();
+  });
 }
 
 // wireLightDismiss closes the dialog on a backdrop click: content lives in

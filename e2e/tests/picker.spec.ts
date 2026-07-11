@@ -104,3 +104,26 @@ test("selecting the sandbox switches the board and persists across reload", asyn
   await expect(page.locator("#project-button")).toContainText(PROJECT);
   expect(await page.locator("#project").inputValue()).toBe(PROJECT);
 });
+
+test("a stale project in localStorage falls back to a real project and still loads", async ({
+  page,
+}) => {
+  // A project persisted earlier may have since been removed from the store.
+  // Init must not trust it blindly (loadProjects falls back to the first
+  // project); otherwise the board would load nothing on that user's next visit.
+  await page.addInitScript(() => localStorage.setItem("taskman.project", "no-such-project-zzz-999"));
+  await page.reload();
+
+  await expect(page.locator(".column")).toHaveCount(3);
+  const resolved = await page.locator("#project").inputValue();
+  expect(resolved, "should not keep the bogus stored project").not.toBe("no-such-project-zzz-999");
+  expect(resolved.length, "should resolve to a real project").toBeGreaterThan(0);
+  await expect(page.locator("#project-button")).not.toBeEmpty();
+
+  // The features map loads for the fallback project without error.
+  await Promise.all([
+    page.waitForResponse((r) => /\/api\/projects\/.+\/features/.test(r.url()) && r.status() === 200),
+    page.locator("#tab-features").click(),
+  ]);
+  await expect(page.locator("#features .features-bar")).toBeVisible();
+});

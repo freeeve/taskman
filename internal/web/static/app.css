@@ -238,7 +238,15 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 .md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 .md img { max-width: 100%; border-radius: 6px; }
 .md { overflow-wrap: anywhere; }
-.md table { border-collapse: collapse; }
+/* display:block turns the table into its own horizontal scroll box (the
+   standard responsive-table pattern): a many-column table's width is driven
+   by column count, which word-breaking cannot shrink. */
+.md table {
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+  max-width: 100%;
+}
 .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; }
 .md a { color: var(--accent); }
 

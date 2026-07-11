@@ -195,3 +195,33 @@ test("a feature body's screenshot link is rewritten through /shots/ like task de
 
   await finishTask(request, t.num);
 });
+
+test("a spec's external links open in a new tab; relative and in-page links do not", async ({
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  const desc = uniqueDesc("feature-links");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  appendFeatureBody(
+    slug,
+    `\n[ext](https://example.com/x) and bare https://autolink.test/y\n\n[rel](./local/page) and [anchor](#section)\n`
+  );
+
+  const feats = await (await request.get(`${base}/features`)).json();
+  const html: string = feats.find((f: { slug: string }) => f.slug === slug).html;
+
+  // The board is an SPA, so absolute http/https links (markdown links and GFM
+  // autolinks alike) get target=_blank rel=noopener noreferrer.
+  const open = `target="_blank" rel="noopener noreferrer" href=`;
+  expect(html).toContain(`${open}"https://example.com/x"`);
+  expect(html).toContain(`${open}"https://autolink.test/y"`);
+
+  // Relative and in-page links stay in-tab -- rendered as bare anchors.
+  expect(html).toContain(`<a href="./local/page"`);
+  expect(html).toContain(`<a href="#section"`);
+  expect(html).not.toContain(`${open}"./local/page"`);
+  expect(html).not.toContain(`${open}"#section"`);
+});

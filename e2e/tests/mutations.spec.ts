@@ -105,6 +105,47 @@ test("the to-top button pushes a pending task to the head of priority in one reo
   await finishTask(page.request, b.num);
 });
 
+test("the to-bottom button sends a pending task to the tail of priority in one reorder commit (task 095)", async ({
+  page,
+}) => {
+  // Drag reordering is insert-before, so the very bottom is unreachable by
+  // drag; the to-bottom button covers it. Create a then b -- b appends last,
+  // so a starts above it; sending a to the bottom must land it past b.
+  const a = await createTaskViaUI(page, uniqueDesc("tobot-a"));
+  const b = await createTaskViaUI(page, uniqueDesc("tobot-b"));
+  const target = a.num;
+
+  const tailNum = () => page.locator(".column.pending .card").last().getAttribute("data-num");
+  expect(await tailNum()).toBe(String(b.num));
+  expect(await tailNum()).not.toBe(String(target));
+
+  const before = headCommit();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/${PROJECT}/order`) && r.request().method() === "PUT"
+    ),
+    page.locator(`.column.pending .card[data-num="${target}"] .to-bottom`).click(),
+  ]);
+
+  // The target now trails the pending column and stays there across a reload.
+  await expect(page.locator(".column.pending .card").last()).toHaveAttribute(
+    "data-num",
+    String(target)
+  );
+  await page.reload();
+  await expect(page.locator(".column.pending .card").last()).toHaveAttribute(
+    "data-num",
+    String(target)
+  );
+
+  const orderCommits = commitsSince(before).filter((c) => c.files.includes(`${PROJECT}/order`));
+  expect(orderCommits).toHaveLength(1);
+  expect(orderCommits[0].subject).toContain("reorder tasks");
+
+  await finishTask(page.request, a.num);
+  await finishTask(page.request, b.num);
+});
+
 test("the board refetches on focus, surfacing an out-of-band task without a reload", async ({
   page,
 }) => {

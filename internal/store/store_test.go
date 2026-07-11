@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/freeeve/taskman/internal/task"
 )
 
 // gitIdentity gives git an identity via the environment so commits work in
@@ -173,6 +175,75 @@ func TestProjects(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "alpha beta" {
 		t.Errorf("Projects = %v (dotdirs and files must be excluded, sorted)", names)
+	}
+}
+
+// TestStoreLock pins the cross-process serialization primitive: exclusive,
+// blocking with a timeout, released explicitly (or at process exit).
+func TestStoreLock(t *testing.T) {
+	home := t.TempDir()
+	l1, err := AcquireLock(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := lockTimeout
+	lockTimeout = 200 * time.Millisecond
+	defer func() { lockTimeout = saved }()
+	if _, err := AcquireLock(home); err == nil {
+		t.Fatal("second acquire must time out while held")
+	}
+	l1.Release()
+	l2, err := AcquireLock(home)
+	if err != nil {
+		t.Fatalf("acquire after release: %v", err)
+	}
+	l2.Release()
+}
+
+// TestConcurrentAllocationUnderLock pins the duplicate-number fix: N
+// concurrent writers each doing lock -> load -> NextNum -> create -> release
+// (the CLI's shape) mint N distinct numbers.
+func TestConcurrentAllocationUnderLock(t *testing.T) {
+	home := t.TempDir()
+	dir := filepath.Join(home, "p", "tasks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const n = 12
+	var wg sync.WaitGroup
+	errs := make([]error, n)
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			lock, err := AcquireLock(home)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			defer lock.Release()
+			tasks, err := task.Load(dir)
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			num := task.NextNum(tasks)
+			errs[i] = task.Create(filepath.Join(dir, fmt.Sprintf("%03d_t%02d.md", num, i)),
+				"# body\n")
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("writer %02d: %v", i, err)
+		}
+	}
+	tasks, _ := task.Load(dir)
+	if len(tasks) != n {
+		t.Fatalf("tasks = %d, want %d", len(tasks), n)
+	}
+	if dups := task.Dups(tasks); len(dups) != 0 {
+		t.Errorf("duplicate numbers minted under lock: %v", dups)
 	}
 }
 

@@ -159,6 +159,7 @@ main#board {
 .badge.lane { background: var(--accent); }
 .badge.deferred { background: var(--deferred); }
 .badge.decision { background: var(--pending); }
+.badge.duplicate { background: #b0524a; }
 
 .decisions-pill {
   color: var(--bg);

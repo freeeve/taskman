@@ -42,9 +42,18 @@ func readBody(r *http.Request, v any) error {
 }
 
 // createTask handles POST tasks: {"description", "lane"} -> 201 + task.
+// Number allocation is a check-then-act, so beyond s.mu (other handlers) it
+// takes the cross-process store lock: a CLI invocation racing this handler
+// would otherwise mint the same number.
 func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	lock, err := store.AcquireLock(s.home)
+	if err != nil {
+		writeErr(w, http.StatusServiceUnavailable, err)
+		return
+	}
+	defer lock.Release()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)

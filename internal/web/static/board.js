@@ -176,6 +176,13 @@ async function loadTasks() {
   if (!state.project) return;
   const data = await api(`/api/projects/${state.project}/tasks`);
   state.tasks = data.tasks;
+  const counts = {};
+  for (const t of data.tasks) counts[t.num] = (counts[t.num] || 0) + 1;
+  state.dupNums = new Set(
+    Object.keys(counts)
+      .filter((n) => counts[n] > 1)
+      .map(Number)
+  );
   updateDecisionsPill();
   const sel = $("#lane");
   const current = state.lane;
@@ -323,7 +330,16 @@ function pushToBottom(num) {
   ).then(() => focusAfterRender(`#board [data-num="${num}"]`, "#tab-tasks"));
 }
 
+// stemOf strips status suffixes and the extension, leaving the ledger stem
+// -- the key that can still resolve one half of a duplicate-numbered pair
+// when the bare number is ambiguous.
+function stemOf(file) {
+  return file.replace(/(\.in-progress|\.done)?(\.deferred)?\.md$/, "");
+}
+
 function card(t) {
+  const isDup = state.dupNums && state.dupNums.has(t.num);
+  const openKey = isDup ? stemOf(t.file) : t.num;
   const el = document.createElement("div");
   el.className = "card" + (t.deferred ? " deferred" : "");
   el.dataset.num = t.num;
@@ -336,7 +352,7 @@ function card(t) {
     if (e.target !== el) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      openTask(t.num).catch((err) => alert(err.message || err));
+      openTask(openKey).catch((err) => alert(err.message || err));
     }
   });
   draggableCard(el, t);
@@ -352,6 +368,12 @@ function card(t) {
     lane.className = "badge lane";
     lane.textContent = t.lane;
     meta.append(lane);
+  }
+  if (isDup) {
+    const dup = document.createElement("span");
+    dup.className = "badge duplicate";
+    dup.textContent = "duplicate — run taskman fix";
+    meta.append(dup);
   }
   if (t.has_decision) {
     const dec = document.createElement("span");
@@ -398,7 +420,7 @@ function card(t) {
   title.textContent = t.title;
   el.append(title);
 
-  el.addEventListener("click", () => openTask(t.num));
+  el.addEventListener("click", () => openTask(openKey).catch((err) => alert(err.message || err)));
   return el;
 }
 
@@ -463,9 +485,11 @@ function render() {
   }
 }
 
-async function openTask(num) {
-  const data = await api(`/api/projects/${state.project}/tasks/${num}`);
-  state.dialogTask = num;
+async function openTask(key) {
+  const data = await api(`/api/projects/${state.project}/tasks/${key}`);
+  // The dialog tracks the resolved number, not the lookup key: stems open
+  // duplicate-numbered tasks, but hash sync and focus want the number.
+  state.dialogTask = data.task.num;
   state.dialogData = data;
   $("#dialog-file").textContent = data.task.file;
   $("#dialog-body").innerHTML = data.html;

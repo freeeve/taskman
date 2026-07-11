@@ -859,6 +859,35 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestDuplicateNumberStemOpen pins duplicate-number resilience: the bare
+// number is ambiguous (404 listing both), but the stem still opens each half
+// with a distinct slug, so an existing dup is manageable from the UI.
+func TestDuplicateNumberStemOpen(t *testing.T) {
+	home, srv := testStore(t)
+	dir := filepath.Join(home, "myproj", "tasks")
+	for _, n := range []string{"007_alpha.md", "007_beta.done.md"} {
+		if err := os.WriteFile(filepath.Join(dir, n), []byte("# 007 -- "+n+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	var ambiguous struct {
+		Error string `json:"error"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/7", &ambiguous); code != 404 ||
+		!strings.Contains(ambiguous.Error, "ambiguous") {
+		t.Errorf("bare number: code %d err %q", code, ambiguous.Error)
+	}
+	var detail struct {
+		Task struct {
+			File string `json:"file"`
+		} `json:"task"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/007_alpha", &detail); code != 200 ||
+		detail.Task.File != "007_alpha.md" {
+		t.Errorf("stem open: code %d file %q", code, detail.Task.File)
+	}
+}
+
 // TestDecisionAPI drives the structured-question flow over HTTP: the flag
 // and parsed payload surface, plain resume refuses, answering validates,
 // records, un-defers, promotes to top-of-order, and stale answers 409.

@@ -22,9 +22,17 @@ type proj struct {
 // openProject ensures the store exists, resolves flagVal (falling back to
 // TASKMAN_PROJECT, the enclosing repo's basename, then the cwd basename) to a
 // project, creates its skeleton on first use, and loads its ledger.
+//
+// It also takes the cross-process store lock for the remainder of this
+// invocation (released at process exit): every mutating command is a
+// check-then-act over the ledger loaded here, and two unlocked CLIs racing
+// the same project mint duplicate task numbers.
 func openProject(flagVal string) (proj, error) {
 	home, err := store.Ensure()
 	if err != nil {
+		return proj{}, err
+	}
+	if err := store.AcquireProcessLock(home); err != nil {
 		return proj{}, err
 	}
 	name, err := store.Resolve(flagVal)

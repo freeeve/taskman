@@ -37,6 +37,82 @@ function chip(c) {
   return el;
 }
 
+// --- task linking: a per-card picker toggles one task's membership on the
+// feature's Tasks: line per open (PUT rewrites the whole list); + task
+// creates a task already linked. One panel at a time.
+let linkPanel = null;
+
+function closeLinkPanel() {
+  if (linkPanel) {
+    linkPanel.remove();
+    linkPanel = null;
+  }
+}
+
+function putFeatureTasks(f, nums) {
+  closeLinkPanel();
+  api(`/api/projects/${state.project}/features/${f.slug}/tasks`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ tasks: nums }),
+  })
+    .then(loadFeatures)
+    .then(() =>
+      focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features")
+    )
+    .catch((err) => alert(err.message || err));
+}
+
+async function openLinkPicker(f, card) {
+  closeLinkPanel();
+  const data = await api(`/api/projects/${state.project}/tasks`);
+  const linked = new Set(f.tasks.map((c) => c.num));
+  const panel = document.createElement("div");
+  panel.className = "link-panel";
+  const search = document.createElement("input");
+  search.type = "search";
+  search.placeholder = "filter tasks...";
+  panel.append(search);
+  const list = document.createElement("ul");
+  panel.append(list);
+  const renderRows = () => {
+    const q = search.value.trim().toLowerCase();
+    list.replaceChildren();
+    for (const t of data.tasks) {
+      const label = `${String(t.num).padStart(3, "0")} ${t.title}`;
+      if (q && !label.toLowerCase().includes(q)) continue;
+      const li = document.createElement("li");
+      li.textContent = (linked.has(t.num) ? "✓ " : "") + label;
+      if (linked.has(t.num)) li.classList.add("linked");
+      li.addEventListener("click", () => {
+        const current = f.tasks.map((c) => c.num);
+        putFeatureTasks(
+          f,
+          linked.has(t.num) ? current.filter((n) => n !== t.num) : [...current, t.num]
+        );
+      });
+      list.append(li);
+    }
+    if (!list.children.length) {
+      const li = document.createElement("li");
+      li.className = "dim";
+      li.textContent = "no matching tasks";
+      list.append(li);
+    }
+  };
+  search.addEventListener("input", renderRows);
+  renderRows();
+  card.append(panel);
+  linkPanel = panel;
+  search.focus();
+}
+
+document.addEventListener("click", (e) => {
+  if (linkPanel && !e.target.closest(".link-panel") && !e.target.closest(".link-btn")) {
+    closeLinkPanel();
+  }
+});
+
 function featureCard(f, specOpen) {
   const el = document.createElement("article");
   el.className = "feature-card" + (f.done ? " done" : "");
@@ -58,6 +134,36 @@ function featureCard(f, specOpen) {
   }
   // Mirrors mutate(): the refresh runs whether the POST succeeded or 409'd,
   // so a stale card self-corrects to server state after a lost race.
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "link-btn";
+  link.textContent = "link";
+  link.title = "link or unlink tasks";
+  link.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openLinkPicker(f, el).catch((err) => alert(err.message || err));
+  });
+  head.append(link);
+
+  const addTask = document.createElement("button");
+  addTask.type = "button";
+  addTask.textContent = "+ task";
+  addTask.title = "create a task linked to this feature";
+  addTask.addEventListener("click", () => {
+    const description = prompt(`New task for "${f.title}":`);
+    if (!description || !description.trim()) return;
+    post(`/api/projects/${state.project}/tasks`, {
+      description: description.trim(),
+      feature: f.slug,
+    })
+      .then(loadFeatures)
+      .then(() =>
+        focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features")
+      )
+      .catch((err) => alert(err.message || err));
+  });
+  head.append(addTask);
+
   const shipAction = (route) => async () => {
     try {
       await post(`/api/projects/${state.project}/features/${f.slug}/${route}`);

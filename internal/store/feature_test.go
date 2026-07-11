@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -124,6 +125,58 @@ func TestShippedFeatureOwnsItsSlug(t *testing.T) {
 	}
 	if string(after) != string(original) {
 		t.Error("shipped feature body was clobbered")
+	}
+}
+
+// TestSetTasks pins the link editor: rewrite in place, insert after the H1
+// when the body has no Tasks: line, dedupe and drop non-positive numbers,
+// and round-trip through LoadFeatures.
+func TestSetTasks(t *testing.T) {
+	projDir := t.TempDir()
+	featureFile(t, projDir, "linked.md", "# Linked\n\nTasks: 001\n\nSpec body.\n")
+	featureFile(t, projDir, "bare.md", "# Bare\n\nJust prose.\n")
+
+	features, err := LoadFeatures(projDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byslug := map[string]Feature{}
+	for _, f := range features {
+		byslug[f.Slug] = f
+	}
+
+	nf, err := byslug["linked"].SetTasks([]int{12, 5, 12, -3, 0, 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(nf.Tasks) != 2 || nf.Tasks[0] != 12 || nf.Tasks[1] != 5 {
+		t.Errorf("SetTasks = %v (dedupe, positive-only, order kept)", nf.Tasks)
+	}
+	body, _ := os.ReadFile(nf.Path())
+	if !strings.Contains(string(body), "Tasks: 012, 005") ||
+		strings.Contains(string(body), "Tasks: 001") {
+		t.Errorf("Tasks line not rewritten:\n%s", body)
+	}
+	if !strings.Contains(string(body), "Spec body.") {
+		t.Errorf("spec body must survive the rewrite:\n%s", body)
+	}
+
+	// No Tasks: line yet: one is inserted after the title.
+	nb, err := byslug["bare"].SetTasks([]int{7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ = os.ReadFile(nb.Path())
+	if !strings.HasPrefix(string(body), "# Bare\n\nTasks: 007\n") {
+		t.Errorf("Tasks line not inserted after H1:\n%s", body)
+	}
+
+	// Round trip.
+	features, _ = LoadFeatures(projDir)
+	for _, f := range features {
+		if f.Slug == "bare" && (len(f.Tasks) != 1 || f.Tasks[0] != 7) {
+			t.Errorf("roundtrip = %+v", f)
+		}
 	}
 }
 

@@ -436,6 +436,71 @@ func TestAPIFeatureMutations(t *testing.T) {
 		t.Errorf("missing feature status %d", code)
 	}
 
+	// Linking: PUT tasks rewrites the Tasks: line (deduped, positive-only),
+	// chips follow, and one scoped commit lands.
+	var linked struct {
+		Tasks []int `json:"tasks"`
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/search-everything/tasks",
+		map[string][]int{"tasks": {2, 1, 2, -5}}, &linked); code != 200 {
+		t.Fatalf("link status %d", code)
+	}
+	if len(linked.Tasks) != 2 || linked.Tasks[0] != 2 || linked.Tasks[1] != 1 {
+		t.Errorf("linked = %v", linked.Tasks)
+	}
+	body, err := os.ReadFile(filepath.Join(home, "myproj", "features", "search-everything.done.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "Tasks: 002, 001") {
+		t.Errorf("Tasks line:\n%s", body)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): feature tasks search-everything" {
+		t.Errorf("link commit = %q", s)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/nope/tasks",
+		map[string][]int{"tasks": {1}}, nil); code != 404 {
+		t.Errorf("link to missing feature status %d", code)
+	}
+
+	// Create-pre-linked: the new task's number lands on the Tasks: line in
+	// the same single commit as the task file.
+	before, err := exec.Command("git", "-C", home, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var newTask struct {
+		Num int `json:"num"`
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks",
+		map[string]string{"description": "Implement search", "feature": "search-everything"},
+		&newTask); code != 201 {
+		t.Fatalf("create-linked status %d", code)
+	}
+	body, _ = os.ReadFile(filepath.Join(home, "myproj", "features", "search-everything.done.md"))
+	if !strings.Contains(string(body), fmt.Sprintf("Tasks: 002, 001, %03d", newTask.Num)) {
+		t.Errorf("new task not linked:\n%s", body)
+	}
+	after, _ := exec.Command("git", "-C", home, "rev-list", "--count", "HEAD").Output()
+	b, _ := strconv.Atoi(strings.TrimSpace(string(before)))
+	a, _ := strconv.Atoi(strings.TrimSpace(string(after)))
+	if a != b+1 {
+		t.Errorf("create-linked commits %d -> %d, want one commit covering both files", b, a)
+	}
+	if s := lastSubject(t, home); !strings.Contains(s, "(feature search-everything)") {
+		t.Errorf("create-linked commit = %q", s)
+	}
+	// A bogus feature slug fails BEFORE the task is created.
+	preFiles, _ := os.ReadDir(filepath.Join(home, "myproj", "tasks"))
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks",
+		map[string]string{"description": "Orphan", "feature": "nope"}, nil); code != 404 {
+		t.Errorf("create with bogus feature status %d", code)
+	}
+	postFiles, _ := os.ReadDir(filepath.Join(home, "myproj", "tasks"))
+	if len(postFiles) != len(preFiles) {
+		t.Error("bogus feature slug must not leave an unlinked task behind")
+	}
+
 	// Ship is reversible: reopen renames back, commits, and 409s when the
 	// feature is not shipped.
 	if code := send(t, srv, "POST", "/api/projects/myproj/features/search-everything/reopen", nil, nil); code != 200 {

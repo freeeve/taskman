@@ -51,10 +51,22 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Description string `json:"description"`
 		Lane        string `json:"lane"`
+		Feature     string `json:"feature"`
 	}
 	if err := readBody(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
 		return
+	}
+	// Resolve the target feature before minting a number, so a bogus slug
+	// cannot leave an unlinked task behind.
+	var feat *store.Feature
+	if req.Feature != "" {
+		f, err := findFeatureSlug(projDir, req.Feature)
+		if err != nil {
+			writeErr(w, http.StatusNotFound, err)
+			return
+		}
+		feat = &f
 	}
 	tasks, _, err := loadTasks(projDir)
 	if err != nil {
@@ -72,7 +84,17 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	if !s.commitOK(w, r.PathValue("p"), "open "+t.Stem(), t.Path()) {
+	msg, paths := "open "+t.Stem(), []string{t.Path()}
+	if feat != nil {
+		nf, err := feat.SetTasks(append(feat.Tasks, t.Num))
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		msg += " (feature " + nf.Slug + ")"
+		paths = append(paths, nf.Path())
+	}
+	if !s.commitOK(w, r.PathValue("p"), msg, paths...) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, toJSON(t))
@@ -321,6 +343,57 @@ func (s *server) featureSetDone(w http.ResponseWriter, r *http.Request, done boo
 		return
 	}
 	writeErr(w, http.StatusNotFound, fmt.Errorf("no feature %q", slug))
+}
+
+// featureTasks handles PUT features/{slug}/tasks: {"tasks":[12,19]} rewrites
+// the feature's Tasks: line -- the link/unlink path that makes the features
+// map populatable without a text editor.
+func (s *server) featureTasks(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req struct {
+		Tasks []int `json:"tasks"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	f, err := findFeatureSlug(projDir, r.PathValue("slug"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	nf, err := f.SetTasks(req.Tasks)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !s.commitOK(w, r.PathValue("p"), "feature tasks "+nf.Slug, nf.Path()) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"slug": nf.Slug, "tasks": nf.Tasks})
+}
+
+// findFeatureSlug resolves an exact feature slug in the project.
+func findFeatureSlug(projDir, slug string) (store.Feature, error) {
+	if !nameOK.MatchString(slug) {
+		return store.Feature{}, fmt.Errorf("invalid feature %q", slug)
+	}
+	feats, err := store.LoadFeatures(projDir)
+	if err != nil {
+		return store.Feature{}, err
+	}
+	for _, f := range feats {
+		if f.Slug == slug {
+			return f, nil
+		}
+	}
+	return store.Feature{}, fmt.Errorf("no feature %q", slug)
 }
 
 // today stamps mutations with the same date format as the CLI.

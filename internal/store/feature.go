@@ -89,6 +89,60 @@ func NewFeature(projDir, desc, date string) (Feature, error) {
 	return f, nil
 }
 
+// SetTasks rewrites the feature's Tasks: line with nums -- deduped, positive
+// only, in the given order -- inserting the line after the H1 title when the
+// body has none yet. The write is a full-file rewrite of just that line, so
+// the rest of the spec is untouched.
+func (f Feature) SetTasks(nums []int) (Feature, error) {
+	clean := make([]int, 0, len(nums))
+	seen := map[int]bool{}
+	for _, n := range nums {
+		if n > 0 && !seen[n] {
+			seen[n] = true
+			clean = append(clean, n)
+		}
+	}
+	parts := make([]string, len(clean))
+	for i, n := range clean {
+		parts[i] = fmt.Sprintf("%03d", n)
+	}
+	line := "Tasks: " + strings.Join(parts, ", ")
+	data, err := os.ReadFile(f.Path())
+	if err != nil {
+		return f, err
+	}
+	lines := strings.Split(string(data), "\n")
+	replaced := false
+	for i, l := range lines {
+		if strings.HasPrefix(l, "Tasks:") {
+			lines[i] = line
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		out := make([]string, 0, len(lines)+2)
+		inserted := false
+		for _, l := range lines {
+			out = append(out, l)
+			if !inserted && strings.HasPrefix(l, "# ") {
+				out = append(out, "", line)
+				inserted = true
+			}
+		}
+		if !inserted {
+			out = append(out, line)
+		}
+		lines = out
+	}
+	if err := os.WriteFile(f.Path(), []byte(strings.Join(lines, "\n")), 0o644); err != nil {
+		return f, err
+	}
+	nf := f
+	nf.Tasks = clean
+	return nf, nil
+}
+
 // SetDone renames the feature to its shipped (or, for false, active) form.
 // It refuses to rename onto an existing file: os.Rename replaces its
 // destination silently, and the destination here is another feature's spec.

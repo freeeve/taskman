@@ -346,6 +346,50 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 #picker-list li.dim { opacity: 0.55; }
 #picker-list .counts { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
 
+.searchbox { position: relative; margin-left: auto; }
+
+#search {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 10px;
+  width: 240px;
+}
+
+#search-results {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 60;
+  width: min(560px, 92vw);
+  max-height: 60vh;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  padding: 6px;
+}
+
+.search-row {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+}
+
+.search-row:hover { background: var(--surface-2); }
+.search-row.dim { opacity: 0.55; cursor: default; }
+.search-where { color: var(--accent); font-size: 11px; white-space: nowrap; }
+.search-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.search-snippet { color: var(--text-dim); }
+.search-status { color: var(--text-dim); font-size: 11px; white-space: nowrap; }
+
 .tabs { display: inline-flex; gap: 2px; }
 .tabs button { border-radius: 6px; color: var(--text-dim); background: none; border-color: transparent; }
 .tabs button.active { color: var(--text); background: var(--surface-2); border-color: var(--border); }

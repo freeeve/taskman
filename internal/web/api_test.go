@@ -835,6 +835,42 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestSearchAPI pins the global search route: cross-project hits with
+// context, rebuild on HEAD movement, and clean handling of empty queries.
+func TestSearchAPI(t *testing.T) {
+	_, srv := testStore(t)
+	var hits []struct {
+		Project string `json:"project"`
+		Kind    string `json:"kind"`
+		Num     int    `json:"num"`
+		Title   string `json:"title"`
+		Snippet string `json:"snippet"`
+	}
+	if code := get(t, srv, "/api/search?q=bold", &hits); code != 200 {
+		t.Fatalf("search status %d", code)
+	}
+	if len(hits) != 1 || hits[0].Project != "myproj" || hits[0].Num != 2 ||
+		!strings.Contains(hits[0].Snippet, "bold") {
+		t.Errorf("hits = %+v", hits)
+	}
+
+	// A mutation moves HEAD; the next query sees the new content.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks",
+		map[string]string{"description": "Chase the zanzibar gazelle"}, nil); code != 201 {
+		t.Fatal("create failed")
+	}
+	if code := get(t, srv, "/api/search?q=zanzibar", &hits); code != 200 || len(hits) != 1 {
+		t.Errorf("post-mutation search: code %d hits %+v", 200, hits)
+	}
+
+	if code := get(t, srv, "/api/search?q=xyzzynope", &hits); code != 200 || len(hits) != 0 {
+		t.Errorf("no-match: %+v", hits)
+	}
+	if code := get(t, srv, "/api/search", nil); code != 400 {
+		t.Errorf("missing q status %d", code)
+	}
+}
+
 // TestEditTask pins the edit endpoint: body replacement re-renders and
 // commits once, a title change renames safely with tokens kept, raw HTML in
 // an edited body stays neutralized, and clobber/empty edits answer cleanly.

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -27,9 +28,62 @@ import (
 // its git commit, turning a lost same-task race into a spurious 500 instead
 // of a clean 409. Mutations are millisecond-scale file renames, so full
 // serialization costs nothing on a single-user localhost server.
+//
+// The search index is the one piece of in-memory state, and it is a cache:
+// rebuilt whenever the store's git HEAD moves (every mutation commits, so
+// HEAD is the freshness token) and swapped in atomically so concurrent
+// queries keep serving the previous index.
 type server struct {
-	home string
-	mu   sync.Mutex
+	home     string
+	mu       sync.Mutex
+	index    atomic.Pointer[store.SearchIndex]
+	searchMu sync.Mutex
+}
+
+// searchIndex returns a fresh-enough index, rebuilding under its own lock
+// when HEAD moved.
+func (s *server) searchIndex() (*store.SearchIndex, error) {
+	head := store.GitHead(s.home)
+	if ix := s.index.Load(); ix != nil && ix.Head == head {
+		return ix, nil
+	}
+	s.searchMu.Lock()
+	defer s.searchMu.Unlock()
+	if ix := s.index.Load(); ix != nil && ix.Head == head {
+		return ix, nil
+	}
+	ix, err := store.BuildIndex(s.home)
+	if err != nil {
+		return nil, err
+	}
+	s.index.Store(ix)
+	return ix, nil
+}
+
+// search handles GET /api/search?q=...: global, cross-project full-text
+// search over task and feature titles and bodies.
+func (s *server) search(w http.ResponseWriter, r *http.Request) {
+	q := strings.TrimSpace(r.URL.Query().Get("q"))
+	if q == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("missing query ?q="))
+		return
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	ix, err := s.searchIndex()
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	results := ix.Search(q, limit)
+	if results == nil {
+		results = []store.SearchResult{}
+	}
+	writeJSON(w, http.StatusOK, results)
 }
 
 // nameOK matches the slugs taskman itself generates; path segments that

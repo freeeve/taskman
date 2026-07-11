@@ -127,6 +127,63 @@ test("the answer API rejects a choice that is not an option without mutating", a
   await finishTask(request, t.num);
 });
 
+test("answering via the Other free-text field records the note and promotes the task", async ({
+  page,
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("dec-other"));
+  poseDecision(t.num, Q, OPTS);
+  await gotoBoard(page);
+  await page.locator("#decisions-pill").click();
+  await page.locator(`[data-num="${t.num}"]`).click();
+
+  const other = "neither -- add a circuit breaker";
+  await page.locator(".decision-other input").fill(other);
+  await page.locator(".decision-other button").click();
+  await expect(page.locator("#task-dialog")).toBeHidden();
+
+  const t2 = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(t2.deferred).toBe(false);
+  expect(t2.has_decision).toBe(false);
+
+  const detail = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(detail.body).toContain("decision answered");
+  expect(detail.body).toContain(other);
+
+  await finishTask(request, t.num);
+});
+
+test("a decision option's label is rendered as text, not live HTML (no injection)", async ({
+  page,
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("dec-xss"));
+  // An option label carrying markup must render inert -- the dialog builds
+  // buttons with textContent, so no element is injected and no handler fires.
+  poseDecision(t.num, "Pick one", [
+    "<img src=x onerror=\"window.__xss=1\">::danger",
+    "Safe choice::fine",
+  ]);
+  await gotoBoard(page);
+  await page.locator("#decisions-pill").click();
+  await page.locator(`[data-num="${t.num}"]`).click();
+
+  const box = page.locator(".decision-box");
+  await expect(box.locator(".decision-option")).toHaveCount(2);
+  const injected = await page.evaluate(() => ({
+    imgInLabel: !!document.querySelector(".decision-option img"),
+    xssFired: (window as unknown as { __xss?: number }).__xss === 1,
+    labelText: document.querySelector(".decision-option strong")?.textContent ?? "",
+  }));
+  expect(injected.imgInLabel, "raw HTML became a live element").toBe(false);
+  expect(injected.xssFired, "an option-label handler executed").toBe(false);
+  expect(injected.labelText).toContain("<img");
+
+  await finishTask(request, t.num);
+});
+
 test("a plain resume refuses a live decision, and a second answer 409s", async ({ request }) => {
   const t = await createTaskViaAPI(request, uniqueDesc("dec-resume-guard"));
   poseDecision(t.num, Q, OPTS);

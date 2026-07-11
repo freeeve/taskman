@@ -34,6 +34,8 @@ var shotExt = map[string]string{
 // Screenshots live outside tasks/ on purpose: agents work the tasks/ files
 // and never need to read image bytes -- the link is for this UI.
 func (s *server) uploadScreenshot(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)

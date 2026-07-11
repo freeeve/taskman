@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
@@ -19,9 +20,15 @@ import (
 	"github.com/freeeve/taskman/internal/task"
 )
 
-// server holds the store root; all state lives on disk.
+// server holds the store root; all state lives on disk. mu serializes the
+// mutating handlers end to end (load -> rename/write -> commit): without it
+// a rename can interleave between another handler's pathspec filtering and
+// its git commit, turning a lost same-task race into a spurious 500 instead
+// of a clean 409. Mutations are millisecond-scale file renames, so full
+// serialization costs nothing on a single-user localhost server.
 type server struct {
 	home string
+	mu   sync.Mutex
 }
 
 // nameOK matches the slugs taskman itself generates; path segments that

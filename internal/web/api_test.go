@@ -466,6 +466,44 @@ func TestConcurrentMutationsAllCommitted(t *testing.T) {
 	}
 }
 
+// TestConcurrentSameTaskUniform409 pins the race semantics: concurrent
+// status changes on ONE task answer 200 for winners and 409 for losers --
+// never 500 -- and leave exactly one file, committed, tree clean.
+func TestConcurrentSameTaskUniform409(t *testing.T) {
+	home, srv := testStore(t)
+	statuses := []string{"done", "in-progress", "pending", "done", "in-progress", "done", "pending", "in-progress"}
+	codes := make([]int, len(statuses))
+	var wg sync.WaitGroup
+	for i, status := range statuses {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := fmt.Sprintf(`{"status":%q}`, status)
+			res, err := http.Post(srv.URL+"/api/projects/myproj/tasks/2/status",
+				"application/json", strings.NewReader(body))
+			if err != nil {
+				return
+			}
+			res.Body.Close()
+			codes[i] = res.StatusCode
+		}()
+	}
+	wg.Wait()
+	for i, code := range codes {
+		if code != 200 && code != 409 {
+			t.Errorf("request %d (%s): code %d, want 200 or 409", i, statuses[i], code)
+		}
+	}
+	// Exactly one file for task 002 survives, and the tree is clean.
+	matches, err := filepath.Glob(filepath.Join(home, "myproj", "tasks", "002_build-board*"))
+	if err != nil || len(matches) != 1 {
+		t.Errorf("task 002 files = %v (%v)", matches, err)
+	}
+	if status := lastPorcelain(t, home); status != "" {
+		t.Errorf("store dirty after same-task races:\n%s", status)
+	}
+}
+
 // lastPorcelain returns git status --porcelain for the store.
 func lastPorcelain(t *testing.T, home string) string {
 	t.Helper()

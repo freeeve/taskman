@@ -41,6 +41,8 @@ func readBody(r *http.Request, v any) error {
 
 // createTask handles POST tasks: {"description", "lane"} -> 201 + task.
 func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -80,6 +82,8 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 // task done prunes its number from the order file in the same commit,
 // exactly like the CLI.
 func (s *server) setStatus(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -136,6 +140,8 @@ func (s *server) setStatus(w http.ResponseWriter, r *http.Request) {
 // mandatory here for the same cause as in the CLI: the filename cannot carry
 // the why.
 func (s *server) deferTask(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -171,6 +177,8 @@ func (s *server) deferTask(w http.ResponseWriter, r *http.Request) {
 
 // resumeTask handles POST tasks/{n}/resume.
 func (s *server) resumeTask(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -195,6 +203,8 @@ func (s *server) resumeTask(w http.ResponseWriter, r *http.Request) {
 // setOrder handles PUT order: {"order":[3,7,12]} -> 204. One drag, one
 // whole-file rewrite, one commit; concurrent writers are last-write-wins.
 func (s *server) setOrder(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -220,6 +230,8 @@ func (s *server) setOrder(w http.ResponseWriter, r *http.Request) {
 
 // createFeature handles POST features: {"description"} -> 201 + feature.
 func (s *server) createFeature(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
@@ -249,6 +261,8 @@ func (s *server) createFeature(w http.ResponseWriter, r *http.Request) {
 
 // featureDone handles POST features/{slug}/done.
 func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	projDir, err := s.projDir(r)
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)

@@ -153,3 +153,33 @@ test("closing the dialog collapses it so neither view is obscured", async ({ pag
   await expect(card(page, t.num)).toBeVisible();
   await finishTask(page.request, t.num);
 });
+
+test("a backdrop click closes the dialog; a click inside or a drag out does not (task 090)", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-dismiss"));
+  await gotoBoard(page);
+  await openCard(page, t.num);
+  const dialog = page.locator("#task-dialog");
+  await expect(dialog).toBeVisible();
+
+  // A click inside the content keeps it open.
+  await page.locator("#dialog-body").click();
+  await expect(dialog).toBeVisible();
+
+  // A press that starts inside and releases on the backdrop must NOT close
+  // (guards a text selection dragged out of the edit field).
+  const body = await page.locator("#dialog-body").boundingBox();
+  await page.mouse.move(body!.x + 12, body!.y + 12);
+  await page.mouse.down();
+  await page.mouse.move(5, 5);
+  await page.mouse.up();
+  await expect(dialog).toBeVisible();
+
+  // A clean click on the backdrop (top-left corner, outside the content) closes.
+  await page.mouse.click(5, 5);
+  await expect(dialog).toBeHidden();
+
+  await finishTask(page.request, t.num);
+});

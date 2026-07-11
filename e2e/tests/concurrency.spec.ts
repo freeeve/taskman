@@ -115,3 +115,55 @@ test("concurrent same-task status changes never leak the store path and leave on
   // and must not fail the cleanup.
   await request.post(`${base}/tasks/${t.num}/status`, { data: { status: "done" } });
 });
+
+test("concurrent ship/unship at one feature never 500s, leaves one file, commits", async ({
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  const create = await request.post(`${base}/features`, {
+    data: { description: uniqueDesc("ship-race") },
+  });
+  expect(create.status()).toBe(201);
+  const slug = (await create.json()).slug as string;
+
+  // Race done and reopen at one feature. Both rename slug.md <-> slug.done.md
+  // behind the same server-wide lock, so the losers get a clean 409 (already
+  // in that state, or SetDone's refusing-to-overwrite guard) -- never a 500,
+  // and never a leaked store path.
+  const routes = ["done", "reopen", "done", "reopen", "done", "reopen", "done"];
+  const responses = await Promise.all(routes.map((rt) => request.post(`${base}/features/${slug}/${rt}`)));
+  for (const res of responses) {
+    expect([200, 409], `unexpected status ${res.status()}`).toContain(res.status());
+    const body = await res.json().catch(() => ({}));
+    if (body.error) expect(body.error, `leaked path: ${body.error}`).not.toMatch(/\/Users\/|\.taskman\//);
+  }
+
+  // Exactly one of the two file forms survives -- never both, never neither.
+  const active = fs.existsSync(path.join(FEATURES_DIR, `${slug}.md`));
+  const shipped = fs.existsSync(path.join(FEATURES_DIR, `${slug}.done.md`));
+  expect(active !== shipped, `active=${active} shipped=${shipped}`).toBe(true);
+
+  // And nothing for this feature is left uncommitted in the store tree.
+  const uncommitted = featuresStatus().filter((line) => line.includes(slug));
+  expect(uncommitted, `uncommitted after ship/unship race: ${uncommitted.join(", ")}`).toEqual([]);
+
+  // Clean up: remove whichever file form remains and commit.
+  for (const name of [`${slug}.md`, `${slug}.done.md`]) {
+    const p = path.join(FEATURES_DIR, name);
+    if (fs.existsSync(p)) fs.rmSync(p);
+  }
+  if (featuresStatus().length) {
+    execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
+    execFileSync("git", [
+      "-C",
+      STORE,
+      "commit",
+      "-q",
+      "-m",
+      `chore(${PROJECT}): clean up ship/unship race feature`,
+      "--",
+      `${PROJECT}/features`,
+    ]);
+  }
+});

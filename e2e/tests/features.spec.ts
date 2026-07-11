@@ -230,3 +230,34 @@ test("a spec's external links open in a new tab; relative and in-page links do n
   expect(html).not.toContain(`${open}"./local/page"`);
   expect(html).not.toContain(`${open}"#section"`);
 });
+
+test("a spec's raw HTML is neutralized, not rendered live (no script/onerror injection)", async ({
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // Feature specs render through the same goldmark pipeline as task bodies,
+  // configured without WithUnsafe: raw HTML is dropped (replaced with an
+  // "omitted" comment), never emitted as live nodes. A spec is author-supplied
+  // markdown, so a live <script> or onerror handler here would be stored XSS
+  // in the board SPA. This test fails loudly if someone ever enables unsafe
+  // HTML rendering.
+  const desc = uniqueDesc("feature-rawhtml");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  appendFeatureBody(
+    slug,
+    `\n<script>window.__pwned = 1;</script>\n\ninline <b>x</b> and <img src=x onerror="window.__pwned=2"> and <a href="javascript:1">j</a>\n`
+  );
+
+  const feats = await (await request.get(`${base}/features`)).json();
+  const html: string = feats.find((f: { slug: string }) => f.slug === slug).html;
+
+  // Raw HTML was seen and deliberately dropped, not silently passed through.
+  expect(html).toContain("<!-- raw HTML omitted -->");
+  // None of the payload survives as executable markup.
+  expect(html).not.toMatch(/<script/i);
+  expect(html).not.toMatch(/onerror=/i);
+  expect(html).not.toMatch(/href="javascript:/i);
+});

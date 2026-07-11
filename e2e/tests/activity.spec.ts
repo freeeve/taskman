@@ -72,3 +72,31 @@ test("the activity API lists mutations newest-first with the project prefix stri
   expect(eB.commit).toMatch(/^[0-9a-f]{7,40}$/);
   expect(eB.time).toBeTruthy();
 });
+
+test("the activity view refreshes on focus, surfacing an out-of-band mutation (task 085)", async ({
+  page,
+  request,
+}) => {
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/activity")),
+    page.locator("#tab-activity").click(),
+  ]);
+
+  // An out-of-band mutation (separate client) the open activity tab doesn't know
+  // about yet -- the store is multi-writer.
+  const created = await request.post(`${base}/features`, {
+    data: { description: uniqueDesc("activity-focus") },
+  });
+  const { slug } = await created.json();
+  const entry = page.locator("#activity .activity-summary", { hasText: `feature ${slug}` });
+  await expect(entry).toHaveCount(0);
+
+  // Regaining focus refreshes the activity list (task 085 taught refreshStale
+  // about the activity tab); the new entry appears without a tab switch.
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/activity")),
+    page.evaluate(() => window.dispatchEvent(new Event("focus"))),
+  ]);
+  await expect(entry.first()).toBeVisible();
+});

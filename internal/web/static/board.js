@@ -306,6 +306,23 @@ function pushToTop(num) {
   ).then(() => focusAfterRender(`#board [data-num="${num}"]`, "#tab-tasks"));
 }
 
+// pushToBottom mirrors pushToTop: drag reordering is insert-before, so the
+// very bottom has no drop target and needs its own control.
+function pushToBottom(num) {
+  const pending = state.tasks
+    .filter((t) => t.status === "pending" && !t.deferred)
+    .map((t) => t.num);
+  if (pending[pending.length - 1] === num) return;
+  const order = [...pending.filter((n) => n !== num), num];
+  mutate(() =>
+    api(`/api/projects/${state.project}/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order }),
+    })
+  ).then(() => focusAfterRender(`#board [data-num="${num}"]`, "#tab-tasks"));
+}
+
 function card(t) {
   const el = document.createElement("div");
   el.className = "card" + (t.deferred ? " deferred" : "");
@@ -359,6 +376,17 @@ function card(t) {
       pushToTop(t.num);
     });
     meta.append(top);
+    const bottom = document.createElement("button");
+    bottom.type = "button";
+    bottom.className = "to-bottom";
+    bottom.textContent = "⤓";
+    bottom.title = "move to bottom of priority";
+    bottom.setAttribute("aria-label", `move task ${t.num} to bottom of priority`);
+    bottom.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pushToBottom(t.num);
+    });
+    meta.append(bottom);
   }
   el.append(meta);
 

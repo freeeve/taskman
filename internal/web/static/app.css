@@ -207,8 +207,7 @@ main#board {
 
 .card.deferred { opacity: 0.65; }
 
-.card .to-top {
-  margin-left: auto;
+.card .to-top, .card .to-bottom {
   padding: 0 6px;
   font-size: 12px;
   line-height: 16px;
@@ -218,7 +217,10 @@ main#board {
   border-radius: 6px;
 }
 
-.card .to-top:hover, .card .to-top:focus-visible {
+.card .to-top { margin-left: auto; }
+
+.card .to-top:hover, .card .to-top:focus-visible,
+.card .to-bottom:hover, .card .to-bottom:focus-visible {
   color: var(--accent);
   border-color: var(--accent);
 }

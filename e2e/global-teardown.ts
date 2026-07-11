@@ -16,6 +16,10 @@ import { PROJECT, SEEDS, STORE, storeIsLocal } from "./helpers";
  *                         prune missed those. Every seed title starts "seed: "
  *                         (slug seed-*) and every spec task uses uniqueDesc
  *                         (slug e2e-*), so keep the seeds and drop the rest.
+ *   - screenshots/NNN/ -- upload specs (padBody etc.) leave a directory per
+ *                         task number; task prune never touched them, so they
+ *                         accumulated unbounded. Seeds carry no screenshots,
+ *                         so every subdir here is spec debris.
  * Global setup recreates any missing seed by title, so this is self-healing.
  * Removals are committed so the shared tree stays clean; only runs when the
  * store is local, and tolerates a concurrent cleaner.
@@ -26,6 +30,25 @@ export default async function globalTeardown(): Promise<void> {
   const isSeed = (name: string) => seedSlugs.some((s) => name.includes(s));
   pruneDir(path.join(STORE, PROJECT, "features"), () => true, `${PROJECT}/features`);
   pruneDir(path.join(STORE, PROJECT, "tasks"), (name) => !isSeed(name), `${PROJECT}/tasks`);
+  pruneScreenshots();
+}
+
+/** Remove every screenshot subdir (all are spec debris; seeds have none) and commit. */
+function pruneScreenshots(): void {
+  const dir = path.join(STORE, PROJECT, "screenshots");
+  if (!fs.existsSync(dir)) return;
+  const subs = fs
+    .readdirSync(dir)
+    .filter((n) => fs.statSync(path.join(dir, n)).isDirectory());
+  if (!subs.length) return;
+  for (const n of subs) fs.rmSync(path.join(dir, n), { recursive: true, force: true });
+  const rel = `${PROJECT}/screenshots`;
+  execFileSync("git", ["-C", STORE, "add", "-A", "--", rel]);
+  try {
+    execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): prune e2e ${rel} fixtures`, "--", rel]);
+  } catch {
+    // Nothing to commit (a concurrent teardown already pruned) -- fine.
+  }
 }
 
 /** Mirror the Go store Slugify: lowercase, runs of non-alphanumerics -> one dash. */

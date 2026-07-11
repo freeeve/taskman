@@ -53,6 +53,23 @@ test("a bogus feature slug in the hash falls back to the features view without e
   await expect(page.locator(`.feature-card[data-slug="no-such-feature-zzz-999"]`)).toHaveCount(0);
 });
 
+test("a shipped feature's deep link still opens its panel (slug, not slug.done)", async ({
+  page,
+  request,
+}) => {
+  // Shipped features live in slug.done.md but the API/card slug stays the base
+  // slug, so the deep link must resolve to the shipped card just the same.
+  const slug = await makeFeature(request, "dl-shipped");
+  expect((await request.post(`${base}/features/${slug}/done`)).ok()).toBeTruthy();
+
+  await page.goto(`/#/p/${PROJECT}/feature/${slug}`);
+  await expect(page.locator("#tab-features")).toHaveClass(/active/);
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await expect(card).toBeVisible();
+  await expect(card.locator(".badge", { hasText: "shipped" })).toBeVisible();
+  await expect(card.locator("details[open]")).toHaveCount(1);
+});
+
 test("a feature deep link with a second panel open does not loop the hash (task 086)", async ({
   page,
   request,

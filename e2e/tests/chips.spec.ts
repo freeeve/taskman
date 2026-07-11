@@ -266,3 +266,32 @@ test("a feature with no linked tasks shows no rollup", async ({ page }) => {
   await expect(card.locator(".rollup")).toHaveCount(0);
   await expect(card.locator(".chips")).toHaveCount(0);
 });
+
+test("shipping a feature keeps its linked-task chips and rollup", async ({ page }) => {
+  // Shipping renames slug.md -> slug.done.md but never touches the Tasks: line,
+  // so the shipped card must still show its chips and rollup.
+  const t = await createTaskViaAPI(page.request, uniqueDesc("ship-chip"));
+  const desc = uniqueDesc("ship-chip-feat");
+  const slug = await createFeature(page, desc);
+  linkTasksToFeature(slug, [t.num]);
+
+  await gotoBoard(page);
+  const card = await openFeature(page, desc);
+  const pad = String(t.num).padStart(3, "0");
+  await expect(card.locator(".chip", { hasText: pad })).toContainText("pending");
+  await expect(card.locator(".rollup")).toContainText("0/1 tasks done");
+
+  // Ship it (confirmed), then the chip and rollup persist on the shipped card.
+  page.once("dialog", (d) => d.accept());
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    card.locator("button", { hasText: "ship it" }).click(),
+  ]);
+  await expect(card.locator(".badge", { hasText: "shipped" })).toBeVisible();
+  await expect(card.locator(".chip", { hasText: pad })).toContainText("pending");
+  await expect(card.locator(".rollup")).toContainText("0/1 tasks done");
+
+  await finishTask(page.request, t.num);
+});

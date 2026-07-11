@@ -71,3 +71,31 @@ test("undo 409s when the project moved since the peek", async ({ request }) => {
   await finishTask(request, t.num);
   await finishTask(request, t2.num);
 });
+
+test("undo of a title edit restores the original slug without orphaning a file", async ({
+  request,
+}) => {
+  // A title edit renames the task file; reverting that rename must restore the
+  // old name and leave exactly one file for the number, not orphan the new one.
+  const t = await createTaskViaAPI(request, uniqueDesc("undo-retitle-old"));
+  const origSlug = t.slug;
+
+  const newTitle = uniqueDesc("undo-retitle-new");
+  expect((await request.put(`${base}/tasks/${t.num}`, { data: { title: newTitle } })).ok()).toBeTruthy();
+  const renamed = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(renamed.slug).not.toBe(origSlug);
+
+  const peek = await (await request.get(`${base}/undo`)).json();
+  expect((await request.post(`${base}/undo`, { data: { commit: peek.commit } })).ok()).toBeTruthy();
+
+  // Back to the original slug, and still exactly one task for this number.
+  const matches = (await (await request.get(`${base}/tasks`)).json()).tasks.filter(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(matches).toHaveLength(1);
+  expect(matches[0].slug).toBe(origSlug);
+
+  await finishTask(request, t.num);
+});

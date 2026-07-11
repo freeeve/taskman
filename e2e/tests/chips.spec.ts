@@ -61,9 +61,13 @@ test("chips render the linked task's status, including in-progress/deferred", as
   await expect(ipdChip).toHaveClass(/in-progress-deferred/);
   await expect(ipdChip).toContainText("in-progress/deferred");
 
-  // A number with no task is an inert "missing" chip.
+  // A number with no task is an inert "missing" chip: a <span>, not a
+  // <button>, so clicking it can never try to open a task that isn't there.
+  // A real chip is a <button> for contrast -- that's the interactivity guard.
   const missing = card.locator(".chip", { hasText: "999999" });
   await expect(missing).toHaveClass(/missing/);
+  expect(await missing.evaluate((el) => el.tagName)).toBe("SPAN");
+  expect(await pendingChip.evaluate((el) => el.tagName)).toBe("BUTTON");
 
   await page.request.post(`${base}/tasks/${ipd.num}/resume`);
   await finishTask(page.request, ipd.num);

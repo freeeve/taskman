@@ -76,6 +76,35 @@ test("API: reopen rejects a feature that is not shipped with a 409", async ({ pa
   removeFeatureBySlug(slug);
 });
 
+test("API: re-creating a slug that is already shipped is a clean 409, spec preserved", async ({
+  page,
+}) => {
+  const desc = uniqueDesc("slug-guard");
+  const slug = await createFeature(page, desc);
+  const shipped = path.join(FEATURES_DIR, `${slug}.done.md`);
+  const active = path.join(FEATURES_DIR, `${slug}.md`);
+
+  // Ship it, then capture the shipped spec's bytes.
+  expect((await page.request.post(`${base}/features/${slug}/done`)).status()).toBe(200);
+  expect(fs.existsSync(shipped)).toBe(true);
+  const before = fs.readFileSync(shipped, "utf8");
+
+  // Re-creating the same description would resolve to the shipped slug. It
+  // must be refused with a 409 (never a 500 or a silent overwrite that would
+  // destroy the shipped spec), and the error must not leak the store path.
+  const res = await page.request.post(`${base}/features`, { data: { description: desc } });
+  expect(res.status()).toBe(409);
+  const err = (await res.json()).error as string;
+  expect(err).toContain("already exists");
+  expect(err).not.toMatch(/\/Users\/|\.taskman\//);
+
+  // The shipped spec is untouched and no active file was created.
+  expect(fs.existsSync(active)).toBe(false);
+  expect(fs.readFileSync(shipped, "utf8")).toBe(before);
+
+  removeFeatureBySlug(slug);
+});
+
 test("API: done then reopen round-trips the feature's file on disk", async ({ page }) => {
   const slug = await createFeature(page, uniqueDesc("roundtrip"));
   const active = path.join(FEATURES_DIR, `${slug}.md`);

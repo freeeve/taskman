@@ -2,7 +2,16 @@ import { test, expect } from "@playwright/test";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { BASE_URL, FEATURES_DIR, PROJECT, STORE, storeIsLocal, uniqueDesc } from "../helpers";
+import {
+  BASE_URL,
+  FEATURES_DIR,
+  PROJECT,
+  STORE,
+  createTaskViaAPI,
+  finishTask,
+  storeIsLocal,
+  uniqueDesc,
+} from "../helpers";
 
 /**
  * The store is a git repo and every web mutation must land as a commit --
@@ -66,4 +75,36 @@ test("a burst of concurrent feature creates are all committed, tree stays clean"
       `${PROJECT}/features`,
     ]);
   }
+});
+
+test("concurrent same-task status changes never leak the store path and leave one file", async ({
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  const t = await createTaskViaAPI(request, uniqueDesc("same-task"));
+
+  // Race several status changes at one task: the losers' os.Rename fails
+  // (the winner already moved the file). Those errors are os.LinkErrors --
+  // their message must not contain the absolute store path (task 039).
+  const targets = ["in-progress", "done", "pending", "done", "in-progress", "pending", "done"];
+  const responses = await Promise.all(
+    targets.map((status) => request.post(`${base}/tasks/${t.num}/status`, { data: { status } }))
+  );
+  for (const res of responses) {
+    const body = await res.json().catch(() => ({}));
+    if (body.error) {
+      expect(body.error, `leaked path: ${body.error}`).not.toMatch(/\/Users\/|\.taskman\//);
+    }
+  }
+
+  // The race must leave exactly one file for the task -- no duplicate, no
+  // zero -- and a valid status.
+  const tasksDir = path.join(STORE, PROJECT, "tasks");
+  const pad = String(t.num).padStart(3, "0");
+  const files = fs
+    .readdirSync(tasksDir)
+    .filter((f) => f.startsWith(`${pad}_`) || f.startsWith(`${pad}-`));
+  expect(files, `task files after race: ${files.join(", ")}`).toHaveLength(1);
+
+  await finishTask(request, t.num);
 });

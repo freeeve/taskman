@@ -279,11 +279,22 @@ function columnDropZone(colEl, status) {
   });
 }
 
+// card stays a draggable div (a raw button would disturb HTML5 DnD), so
+// keyboard access is grafted on: focusable, role=button, Enter/Space opens
+// the detail dialog. Dragging itself remains pointer-only by design.
 function card(t) {
   const el = document.createElement("div");
   el.className = "card" + (t.deferred ? " deferred" : "");
   el.dataset.num = t.num;
   el.dataset.status = t.status;
+  el.tabIndex = 0;
+  el.setAttribute("role", "button");
+  el.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      openTask(t.num).catch((err) => alert(err.message || err));
+    }
+  });
   draggableCard(el, t);
 
   const meta = document.createElement("div");

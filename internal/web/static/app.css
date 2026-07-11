@@ -133,6 +133,7 @@ main#board {
 }
 
 .card:hover { border-color: var(--accent); }
+.card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
 .card .meta {
   display: flex;

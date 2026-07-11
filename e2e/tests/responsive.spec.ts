@@ -1,5 +1,8 @@
 import { test, expect, type Page } from "@playwright/test";
-import { gotoBoard } from "../helpers";
+import { execFileSync } from "child_process";
+import * as fs from "fs";
+import * as path from "path";
+import { BASE_URL, FEATURES_DIR, PROJECT, STORE, gotoBoard, storeIsLocal } from "../helpers";
 
 /**
  * Responsive layout: the shared header must wrap rather than overflow at
@@ -45,6 +48,58 @@ test("neither tab overflows horizontally and all header controls stay on-screen"
       ).toEqual([]);
     }
   }
+});
+
+test("a feature with a long unbreakable-word title stays within narrow viewports", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // One long token with no space or hyphen to break on (a unique numeric
+  // suffix keeps the slug distinct); it stays under the 200-char slug limit.
+  // Before the fix this widened the card, scrolled the page sideways, and
+  // pushed the ship-it button off-screen (task 057).
+  const title = "x".repeat(120) + Date.now();
+  const res = await page.request.post(`${BASE_URL}/api/projects/${PROJECT}/features`, {
+    data: { description: title },
+  });
+  expect(res.status()).toBe(201);
+  const slug = (await res.json()).slug as string;
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const cardSel = `.feature-card[data-slug="${slug}"]`;
+  await expect(page.locator(cardSel)).toBeVisible();
+
+  for (const width of NARROW) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await hasHorizontalOverflow(page), `@${width}: horizontal overflow`).toBe(false);
+    // The ship-it button must stay reachable within the viewport.
+    const btnOffscreen = await page.evaluate((sel) => {
+      const btn = document.querySelector(`${sel} .feature-head button`);
+      if (!btn) return true;
+      const r = btn.getBoundingClientRect();
+      return r.right > window.innerWidth + 1 || r.left < -1;
+    }, cardSel);
+    expect(btnOffscreen, `@${width}: ship-it button off-screen`).toBe(false);
+  }
+
+  // Clean up the probe feature so the sandbox stays lean.
+  fs.rmSync(path.join(FEATURES_DIR, `${slug}.md`));
+  execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
+  execFileSync("git", [
+    "-C",
+    STORE,
+    "commit",
+    "-q",
+    "-m",
+    `chore(${PROJECT}): clean up long-title responsive feature`,
+    "--",
+    `${PROJECT}/features`,
+  ]);
 });
 
 test("the project picker panel stays within a narrow viewport when open", async ({ page }) => {

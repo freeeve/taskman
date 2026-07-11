@@ -100,7 +100,31 @@ until someone ranks them.
 feature (requirements and design notes live in the body), renamed to
 `.done.md` when shipped. A `Tasks: 012, 019` line links the implementing
 tasks; `taskman feature list` and the web UI roll up their completion.
-Linking is a one-line body edit by design.
+
+### Authoring workflow
+
+Features are deliberately **flat**: no parent/child feature files. One
+`features/<slug>.md` per feature, with depth expressed *inside* the file --
+nested headings, sub-sections, and checklists, as deep as the spec needs.
+
+- **Open a feature** when the work describes *what the product should do*
+  and outlives a single task: a capability, surface, or behavior whose
+  requirements are worth recording. **Open a plain task** when it is one
+  bounded change (a fix, a chore, one step of a feature).
+- **Write the spec in the body**: motivation, requirements, decisions,
+  edge cases. Structure goes into the file, never into child features.
+- **Link the implementing tasks** and keep the `Tasks:` line current: the
+  web UI's link picker toggles membership, its "+ task" creates a task
+  pre-linked, or edit the line by hand (`Tasks: 012, 019`). Chips and the
+  N/M rollup follow the ledger automatically.
+- **Ship it** (`taskman feature done <slug>` or the ship-it button) when
+  the linked tasks are done and the behavior is live; `feature reopen` /
+  unship reverses a premature ship.
+
+Agent sessions should treat the features map as first-class: when picking
+up work that introduces a capability, open or update its feature spec and
+link the tasks -- an empty features map means the source of truth lives
+nowhere.
 
 ## Web UI
 

@@ -60,6 +60,16 @@ is a feature; long requirements live in the feature body rather than
 sibling documents (one convention, no ambiguity about what is a feature).
 The `Tasks:` line is parsed leniently. No `feature link` command in v1 --
 editing one line by hand or via the UI did not justify a command surface.
+(The web UI later gained a link picker and pre-linked task creation over
+the same line; the CLI surface stayed as decided.)
+
+**Features stay flat -- depth lives inside the file.** (2026-07-11, user
+decision.) No parent/child hierarchy of feature files: one
+`features/<slug>.md` per feature, expressing whatever granularity it needs
+internally with nested headings and checklists. Keeps the store flat,
+greppable, and git-friendly, and required no model or migration change.
+Revisit trigger: genuinely needing cross-file rollups (epic-level progress
+across many features).
 
 **goldmark, server-side, as the only dependency.** Full GFM was wanted;
 hand-rolling GFM is irresponsible and a vendored JS renderer would be a

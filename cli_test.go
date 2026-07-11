@@ -455,6 +455,19 @@ func TestDecisionFlow(t *testing.T) {
 	}
 }
 
+// TestVersion pins the skew diagnostic: version always prints something and
+// never errors, whatever build info is present.
+func TestVersion(t *testing.T) {
+	out := capture(t, func() {
+		if err := run([]string{"version"}); err != nil {
+			t.Errorf("version: %v", err)
+		}
+	})
+	if !strings.HasPrefix(out, "taskman") {
+		t.Errorf("version output = %q", out)
+	}
+}
+
 // TestServeArgs pins the serve command's guard rails without binding.
 func TestServeArgs(t *testing.T) {
 	storeLedger(t, "serveproj")

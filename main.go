@@ -10,6 +10,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"runtime/debug"
 
 	"github.com/freeeve/taskman/internal/task"
 )
@@ -64,6 +65,8 @@ func run(args []string) error {
 		return cmdProjects(rest)
 	case "migrate":
 		return cmdMigrate(rest)
+	case "version", "-version", "--version":
+		return cmdVersion()
 	case "help", "-h", "--help":
 		usage()
 		return nil
@@ -71,6 +74,39 @@ func run(args []string) error {
 		usage()
 		return fmt.Errorf("unknown command %q", cmd)
 	}
+}
+
+// cmdVersion prints what this binary was built from (VCS revision, time,
+// dirty marker), so skew between the PATH cli and a running server is
+// diagnosable rather than a mystery flag error.
+func cmdVersion() error {
+	info, ok := debug.ReadBuildInfo()
+	if !ok {
+		fmt.Println("taskman (no build info)")
+		return nil
+	}
+	rev, when, dirty := "", "", ""
+	for _, s := range info.Settings {
+		switch s.Key {
+		case "vcs.revision":
+			rev = s.Value
+		case "vcs.time":
+			when = s.Value
+		case "vcs.modified":
+			if s.Value == "true" {
+				dirty = " (modified)"
+			}
+		}
+	}
+	if len(rev) > 12 {
+		rev = rev[:12]
+	}
+	if rev == "" {
+		fmt.Println("taskman", info.Main.Version)
+		return nil
+	}
+	fmt.Printf("taskman %s %s%s\n", rev, when, dirty)
+	return nil
 }
 
 // usage prints the command summary.
@@ -121,6 +157,8 @@ Usage:
                                a path
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
+  taskman version              build revision of this binary (diagnose
+                               cli/server skew)
   taskman serve [-addr host:port]
                                kanban web app over the store (localhost only
                                unless -insecure-bind; there is no auth)

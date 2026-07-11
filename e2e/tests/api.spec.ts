@@ -126,6 +126,18 @@ test.describe("error handling", () => {
     expect(res.status()).toBe(400);
     expect((await res.json()).error).toContain("empty slug");
   });
+
+  test("rejects malformed and path-traversal project names at the boundary", async ({ request }) => {
+    // The project path segment is the traversal guard: only [a-z0-9][a-z0-9-]*
+    // resolves to a store directory, so uppercase, dots, underscores, a leading
+    // dash, and encoded traversal all fail before touching the filesystem.
+    for (const bad of ["E2E-SANDBOX", "bad.name", "under_score", "-leading", "..%2f..%2fetc"]) {
+      const res = await request.get(`${BASE_URL}/api/projects/${bad}/tasks`);
+      expect(res.status(), `${bad} must be rejected`).toBe(404);
+    }
+    // A well-formed project still resolves (the guard is not over-broad).
+    expect((await request.get(`${base}/tasks`)).status()).toBe(200);
+  });
 });
 
 test.describe("GET /api/projects/{p}/features", () => {

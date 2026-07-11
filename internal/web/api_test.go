@@ -835,6 +835,62 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestActivity pins the audit-trail view: newest-first project-scoped
+// commits with stripped summaries and commit-metadata timestamps; other
+// projects' commits do not bleed in.
+func TestActivity(t *testing.T) {
+	home, srv := testStore(t)
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/status",
+		map[string]string{"status": "in-progress"}, nil); code != 200 {
+		t.Fatal("setup mutation failed")
+	}
+	// Another project commits afterward; it must not appear.
+	other := filepath.Join(home, "otherproj", "tasks")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "001_x.md"), []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "chore(otherproj): open 001_x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", home}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	var entries []struct {
+		Commit  string `json:"commit"`
+		Subject string `json:"subject"`
+		Summary string `json:"summary"`
+		Time    string `json:"time"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/activity?limit=10", &entries); code != 200 {
+		t.Fatalf("activity status %d", code)
+	}
+	if len(entries) < 2 {
+		t.Fatalf("entries = %+v", entries)
+	}
+	if entries[0].Summary != "start 002_build-board" ||
+		entries[0].Subject != "chore(myproj): start 002_build-board" {
+		t.Errorf("top entry = %+v", entries[0])
+	}
+	if entries[0].Time == "" || !strings.Contains(entries[0].Time, "T") {
+		t.Errorf("time not ISO commit metadata: %q", entries[0].Time)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Subject, "otherproj") {
+			t.Errorf("foreign commit bled in: %+v", e)
+		}
+	}
+	// limit is respected.
+	if code := get(t, srv, "/api/projects/myproj/activity?limit=1", &entries); code != 200 || len(entries) != 1 {
+		t.Errorf("limit=1 -> %d entries", len(entries))
+	}
+	if code := get(t, srv, "/api/projects/nope/activity", nil); code != 404 {
+		t.Errorf("unknown project status %d", code)
+	}
+}
+
 // TestUndo pins the revert path: undo restores the prior state as its own
 // commit, targets THIS project's newest taskman commit (not repo HEAD),
 // refuses stale hashes and foreign commits, and an undo is itself undoable.

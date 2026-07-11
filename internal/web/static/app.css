@@ -335,6 +335,34 @@ main#features {
 
 .features-bar { display: flex; justify-content: flex-end; }
 
+main#activity {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.activity-row {
+  display: flex;
+  gap: 12px;
+  align-items: baseline;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.activity-row:hover { background: var(--surface-2); }
+
+.activity-time {
+  color: var(--text-dim);
+  font-size: 11px;
+  min-width: 72px;
+  white-space: nowrap;
+}
+
+.activity-summary { font-size: 13px; overflow-wrap: anywhere; }
+
 .feature-card {
   background: var(--surface);
   border: 1px solid var(--border);

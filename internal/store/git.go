@@ -109,6 +109,32 @@ func LastProjectCommit(home, project string) (hash, subject string, err error) {
 	return hash, subject, nil
 }
 
+// LogEntry is one commit in a project's history.
+type LogEntry struct {
+	Hash    string
+	Subject string
+	Time    string // author date, ISO 8601, straight from commit metadata
+}
+
+// ProjectLog returns recent commits touching the project's directory,
+// newest first.
+func ProjectLog(home, project string, limit int) ([]LogEntry, error) {
+	out, err := exec.Command("git", "-C", home, "log", "-n", fmt.Sprint(limit),
+		"--format=%H%x00%s%x00%aI", "--", project+"/").Output()
+	if err != nil {
+		return nil, fmt.Errorf("git log: %v", err)
+	}
+	var entries []LogEntry
+	for line := range strings.SplitSeq(strings.TrimSpace(string(out)), "\n") {
+		parts := strings.SplitN(line, "\x00", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		entries = append(entries, LogEntry{Hash: parts[0], Subject: parts[1], Time: parts[2]})
+	}
+	return entries, nil
+}
+
 // Revert reverts one commit as its own no-edit revert commit, keeping the
 // trail append-only (and the undo itself undoable). A conflicting revert is
 // aborted so the working tree is left clean.

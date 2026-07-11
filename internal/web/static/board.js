@@ -608,6 +608,9 @@ async function refreshStale() {
   if (typeof featuresVisible !== "undefined" && featuresVisible) {
     await loadFeatures().catch(showError);
   }
+  if (typeof activityVisible !== "undefined" && activityVisible) {
+    await loadActivity().catch(showError);
+  }
   window.scrollTo(0, y);
   if (num) {
     const el = document.querySelector(`[data-num="${num}"]`);

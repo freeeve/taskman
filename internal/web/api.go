@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -134,6 +135,44 @@ func toJSON(t task.Task) taskJSON {
 		Num: t.Num, Lane: t.Lane, Slug: t.Slug, Status: t.Status.String(),
 		Deferred: t.Deferred, File: t.File, Title: title(t),
 	}
+}
+
+// activity lists recent commits touching the project, newest first: the
+// audit trail as a read-only view. The summary strips the conventional
+// prefix for display; the raw subject rides along.
+func (s *server) activity(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.projDir(r); err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	p := r.PathValue("p")
+	entries, err := store.ProjectLog(s.home, p, limit)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	type entryJSON struct {
+		Commit  string `json:"commit"`
+		Subject string `json:"subject"`
+		Summary string `json:"summary"`
+		Time    string `json:"time"`
+	}
+	out := []entryJSON{}
+	for _, e := range entries {
+		out = append(out, entryJSON{
+			Commit:  e.Hash,
+			Subject: e.Subject,
+			Summary: strings.TrimSpace(strings.TrimPrefix(e.Subject, "chore("+p+"):")),
+			Time:    e.Time,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // projects lists store projects with open/deferred counts.

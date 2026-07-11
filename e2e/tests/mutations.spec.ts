@@ -146,6 +146,27 @@ test("the to-bottom button sends a pending task to the tail of priority in one r
   await finishTask(page.request, b.num);
 });
 
+test("the to-top and to-bottom buttons stack vertically, up above down (task 096)", async ({
+  page,
+}) => {
+  // The two priority controls read better stacked (up = top, down = bottom)
+  // than side by side; guard the orientation so a CSS change cannot silently
+  // revert it.
+  const t = await createTaskViaUI(page, uniqueDesc("stack"));
+  const box = async (sel: string) =>
+    page.locator(`.column.pending .card[data-num="${t.num}"] ${sel}`).boundingBox();
+  const top = await box(".to-top");
+  const bottom = await box(".to-bottom");
+  expect(top && bottom).toBeTruthy();
+  // Down sits below up (stacked), not beside it.
+  expect(bottom!.y).toBeGreaterThanOrEqual(top!.y + top!.height - 1);
+  // Both share the same horizontal column (centers aligned within a pixel or two).
+  const cx = (b: { x: number; width: number }) => b.x + b.width / 2;
+  expect(Math.abs(cx(top!) - cx(bottom!))).toBeLessThan(3);
+
+  await finishTask(page.request, t.num);
+});
+
 test("the board refetches on focus, surfacing an out-of-band task without a reload", async ({
   page,
 }) => {

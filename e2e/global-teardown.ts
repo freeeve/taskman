@@ -1,35 +1,47 @@
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { PROJECT, STORE, storeIsLocal } from "./helpers";
+import { PROJECT, SEEDS, STORE, storeIsLocal } from "./helpers";
 
 /**
- * Global teardown: prune the sandbox debris a run leaves behind.
+ * Global teardown: reset the sandbox to its baseline so nothing accumulates.
  *
- * Two things accumulate across runs and, left alone, slow every board/features
- * render (the API reads and sorts the whole ledger on each load) until the
- * suite drifts into timeouts (tasks 074, 077):
- *   - features/*.md    -- specs are only ever created by specs, never seeded,
- *                         and cannot be deleted through the API.
- *   - tasks/*.done.md  -- every mutation spec drives its tasks to done, and
- *                         nothing reclaims them. Pending / in-progress seeds are
- *                         kept; global setup recreates the single done seed by
- *                         title on the next run.
+ * The store API reads and sorts the whole ledger on each board/features render,
+ * so debris left across runs steadily slows the suite until it times out
+ * (tasks 074, 077). Two sources accumulate:
+ *   - features/*.md    -- only ever created by specs, never seeded, and not
+ *                         deletable through the API.
+ *   - tasks/*.md       -- specs create tasks; many drive them to done, but some
+ *                         leave them pending/in-progress, and the done-only
+ *                         prune missed those. Every seed title starts "seed: "
+ *                         (slug seed-*) and every spec task uses uniqueDesc
+ *                         (slug e2e-*), so keep the seeds and drop the rest.
+ * Global setup recreates any missing seed by title, so this is self-healing.
  * Removals are committed so the shared tree stays clean; only runs when the
- * store is local to the runner, and tolerates a concurrent cleaner.
+ * store is local, and tolerates a concurrent cleaner.
  */
 export default async function globalTeardown(): Promise<void> {
   if (!storeIsLocal()) return;
-  pruneDir(path.join(STORE, PROJECT, "features"), (n) => n.endsWith(".md"), `${PROJECT}/features`);
-  pruneDir(path.join(STORE, PROJECT, "tasks"), (n) => n.endsWith(".done.md"), `${PROJECT}/tasks`);
+  const seedSlugs = Object.values(SEEDS).map(slugify);
+  const isSeed = (name: string) => seedSlugs.some((s) => name.includes(s));
+  pruneDir(path.join(STORE, PROJECT, "features"), () => true, `${PROJECT}/features`);
+  pruneDir(path.join(STORE, PROJECT, "tasks"), (name) => !isSeed(name), `${PROJECT}/tasks`);
 }
 
-/** Remove matching files in dir and commit the removal under its rel path. */
-function pruneDir(dir: string, match: (name: string) => boolean, rel: string): void {
+/** Mirror the Go store Slugify: lowercase, runs of non-alphanumerics -> one dash. */
+function slugify(desc: string): string {
+  return desc
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+/** Remove *.md files in dir that `drop` selects, and commit under its rel path. */
+function pruneDir(dir: string, drop: (name: string) => boolean, rel: string): void {
   if (!fs.existsSync(dir)) return;
   let removed = 0;
   for (const name of fs.readdirSync(dir)) {
-    if (match(name)) {
+    if (name.endsWith(".md") && drop(name)) {
       fs.rmSync(path.join(dir, name));
       removed++;
     }

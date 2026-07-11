@@ -98,3 +98,30 @@ test("acting on a task from its chip updates the chip without a tab switch", asy
 
   await finishTask(page.request, t.num);
 });
+
+test("an interactive chip is a focusable button and Enter opens the task", async ({ page }) => {
+  const t = await createTaskViaAPI(page.request, uniqueDesc("chip-a11y"));
+  const desc = uniqueDesc("chip-a11y-feat");
+  const slug = await createFeature(page, desc);
+  linkTasksToFeature(slug, [t.num, 999999]);
+
+  await gotoBoard(page);
+  const card = await openFeature(page, desc);
+  const pad = String(t.num).padStart(3, "0");
+
+  // The linked-task chip is a real button; keyboard focus + Enter opens it.
+  const chip = card.locator(".chip", { hasText: pad });
+  await expect(chip).toHaveJSProperty("tagName", "BUTTON");
+  await chip.focus();
+  await expect(chip).toBeFocused();
+  await page.keyboard.press("Enter");
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect(page.locator("#dialog-file")).toContainText(String(t.num).padStart(3, "0"));
+  await page.locator("#dialog-close").click();
+
+  // The missing chip stays an inert span -- not a button, not focusable.
+  const missing = card.locator(".chip", { hasText: "999999" });
+  await expect(missing).toHaveJSProperty("tagName", "SPAN");
+
+  await finishTask(page.request, t.num);
+});

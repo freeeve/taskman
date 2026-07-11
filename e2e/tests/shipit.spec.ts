@@ -220,6 +220,33 @@ test("UI: ship it (confirmed) then unship round-trips the card state", async ({ 
   removeFeatureBySlug(slug);
 });
 
+test("UI: shipping keeps the open spec panel open as the card moves to the done section", async ({
+  page,
+}) => {
+  const desc = uniqueDesc("ship-panel");
+  const slug = await createFeature(page, desc);
+  await gotoBoard(page);
+  await openFeaturesTab(page);
+  const cardSel = `.feature-card[data-slug="${slug}"]`;
+  await expect(page.locator(cardSel)).toBeVisible();
+
+  // Open the spec, then ship it. The card relocates from the active partition
+  // to the done partition, but renderFeatures preserves open panels by slug --
+  // the reading position must survive the move (cf. task 033).
+  await page.locator(`${cardSel} summary`).click();
+  await expect(page.locator(`${cardSel} details`)).toHaveJSProperty("open", true);
+
+  page.once("dialog", (d) => d.accept());
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`${PROJECT}/features`) && r.request().method() === "GET"),
+    page.locator(cardSel).locator("button", { hasText: "ship it" }).click(),
+  ]);
+  await expect(page.locator(cardSel)).toHaveClass(/done/);
+  await expect(page.locator(`${cardSel} details`)).toHaveJSProperty("open", true);
+
+  removeFeatureBySlug(slug);
+});
+
 test("UI: a stale ship-it that 409s still refreshes the card to the shipped state", async ({
   page,
 }) => {

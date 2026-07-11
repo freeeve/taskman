@@ -386,6 +386,35 @@ func renderBody(body []byte, project string) (string, error) {
 	return rewriteLinks(rewriteShots(html.String(), project)), nil
 }
 
+// featureDetail returns one feature with its raw body (for the editor) and
+// rendered html.
+func (s *server) featureDetail(w http.ResponseWriter, r *http.Request) {
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	f, err := findFeatureSlug(projDir, r.PathValue("slug"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	body, err := os.ReadFile(f.Path())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	rendered, err := renderBody(body, r.PathValue("p"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"slug": f.Slug, "done": f.Done, "title": f.Title, "file": f.File,
+		"body": string(body), "html": rendered,
+	})
+}
+
 // features returns the project's features with per-linked-task status chips.
 func (s *server) features(w http.ResponseWriter, r *http.Request) {
 	projDir, err := s.projDir(r)

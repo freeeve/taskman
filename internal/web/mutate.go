@@ -559,6 +559,45 @@ func (s *server) editTask(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toJSON(t))
 }
 
+// editFeature handles PUT features/{slug}: {"body"} replaces the spec's raw
+// markdown (the Tasks: line rides inside it, exactly as on disk). The title
+// and slug stay immutable here -- a slug rename ripples through deep links
+// and chips and stays a separate step if ever wanted.
+func (s *server) editFeature(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req struct {
+		Body string `json:"body"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if strings.TrimSpace(req.Body) == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("nothing to edit: pass a body"))
+		return
+	}
+	f, err := findFeatureSlug(projDir, r.PathValue("slug"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	body := strings.TrimRight(req.Body, "\n") + "\n"
+	if err := os.WriteFile(f.Path(), []byte(body), 0o644); err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	if !s.commitOK(w, r.PathValue("p"), "edit feature "+f.Slug, f.Path()) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"slug": f.Slug, "done": f.Done})
+}
+
 // deleteFeature handles DELETE features/{slug}: discard the spec file
 // (active or shipped) with one scoped removal commit -- undoable via the
 // project undo. Linked tasks are independent files and stay untouched.

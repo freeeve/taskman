@@ -168,6 +168,15 @@ function featureCard(f, specOpen) {
   }
   // Mirrors mutate(): the refresh runs whether the POST succeeded or 409'd,
   // so a stale card self-corrects to server state after a lost race.
+  const edit = document.createElement("button");
+  edit.type = "button";
+  edit.textContent = "edit";
+  edit.title = "edit the spec body";
+  edit.addEventListener("click", () => {
+    editFeatureSpec(f).catch((err) => alert(err.message || err));
+  });
+  head.append(edit);
+
   const link = document.createElement("button");
   link.type = "button";
   link.className = "link-btn";
@@ -277,6 +286,49 @@ function featureCard(f, specOpen) {
 // ping-pong loop. Toggle events are queued as tasks, so the flag clears on a
 // queued task too, after every rebuild toggle has fired.
 let renderingFeatures = false;
+
+// editFeatureSpec opens the shared dialog with the feature's raw markdown in
+// the task editor's textarea. The title/slug is immutable here (a rename
+// ripples through deep links and chips); the Tasks: line is part of the body
+// and editable like the rest.
+async function editFeatureSpec(f) {
+  const detail = await api(`/api/projects/${state.project}/features/${f.slug}`);
+  state.dialogTask = null;
+  state.dialogData = null;
+  $("#dialog-file").textContent = detail.file + " (title/slug fixed; body only)";
+  const body = $("#dialog-body");
+  body.replaceChildren();
+  const ta = document.createElement("textarea");
+  ta.id = "edit-body";
+  ta.value = detail.body;
+  body.append(ta);
+
+  const bar = $("#dialog-actions");
+  bar.replaceChildren();
+  const save = document.createElement("button");
+  save.textContent = "save";
+  save.addEventListener("click", async () => {
+    try {
+      await api(`/api/projects/${state.project}/features/${f.slug}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: ta.value }),
+      });
+    } catch (err) {
+      alert(err.message || err);
+    }
+    $("#task-dialog").close();
+    await loadFeatures().catch(showError);
+    focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features");
+  });
+  bar.append(save);
+  const cancel = document.createElement("button");
+  cancel.textContent = "cancel";
+  cancel.addEventListener("click", () => $("#task-dialog").close());
+  bar.append(cancel);
+  $("#task-dialog").showModal();
+  ta.focus();
+}
 
 function renderFeatures(feats) {
   renderingFeatures = true;

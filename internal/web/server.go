@@ -36,6 +36,8 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/done", s.featureDone)
 	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/reopen", s.featureReopen)
 	mux.HandleFunc("PUT /api/projects/{p}/features/{slug}/tasks", s.featureTasks)
+	mux.HandleFunc("GET /api/projects/{p}/features/{slug}", s.featureDetail)
+	mux.HandleFunc("PUT /api/projects/{p}/features/{slug}", s.editFeature)
 	mux.HandleFunc("DELETE /api/projects/{p}/features/{slug}", s.deleteFeature)
 	mux.HandleFunc("GET /api/projects/{p}/activity", s.activity)
 	mux.HandleFunc("GET /api/projects/{p}/undo", s.undoPeek)

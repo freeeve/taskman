@@ -519,6 +519,43 @@ func TestAPIFeatureMutations(t *testing.T) {
 		t.Errorf("missing feature reopen status %d", code)
 	}
 
+	// Detail exposes the raw body; PUT body edits it in place with one
+	// scoped commit, and rendering stays safe.
+	var featDetail struct {
+		Body string `json:"body"`
+		File string `json:"file"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/features/kanban", &featDetail); code != 200 ||
+		!strings.Contains(featDetail.Body, "Tasks:") || featDetail.File != "kanban.md" {
+		t.Fatalf("feature detail: code %d %+v", code, featDetail)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/kanban",
+		map[string]string{"body": "# Kanban\n\nTasks: 001\n\nRewritten spec <script>x</script>\n"}, nil); code != 200 {
+		t.Fatalf("feature edit status %d", code)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): edit feature kanban" {
+		t.Errorf("feature edit commit = %q", s)
+	}
+	var featAfter struct {
+		Body string `json:"body"`
+		HTML string `json:"html"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/features/kanban", &featAfter); code != 200 ||
+		!strings.Contains(featAfter.Body, "Rewritten spec") {
+		t.Errorf("feature body not persisted: %+v", featAfter)
+	}
+	if strings.Contains(featAfter.HTML, "<script>") {
+		t.Errorf("raw HTML must stay neutralized: %q", featAfter.HTML)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/kanban",
+		map[string]string{"body": "  "}, nil); code != 400 {
+		t.Errorf("empty feature edit status %d", code)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/nope",
+		map[string]string{"body": "x"}, nil); code != 404 {
+		t.Errorf("unknown feature edit status %d", code)
+	}
+
 	// Delete discards the spec (linked tasks untouched), commits once, and
 	// project undo restores it.
 	if code := send(t, srv, "DELETE", "/api/projects/myproj/features/kanban", nil, nil); code != 204 {

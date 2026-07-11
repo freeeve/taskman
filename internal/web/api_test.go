@@ -835,6 +835,99 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestUndo pins the revert path: undo restores the prior state as its own
+// commit, targets THIS project's newest taskman commit (not repo HEAD),
+// refuses stale hashes and foreign commits, and an undo is itself undoable.
+func TestUndo(t *testing.T) {
+	home, srv := testStore(t)
+	dir := filepath.Join(home, "myproj", "tasks")
+
+	// Mutate: 002 done (also prunes it from the order file).
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/status",
+		map[string]string{"status": "done"}, nil); code != 200 {
+		t.Fatal("setup mutation failed")
+	}
+
+	// Another project commits after ours; undo must still target myproj.
+	other := filepath.Join(home, "otherproj", "tasks")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "001_x.md"), []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "chore(otherproj): open 001_x"}} {
+		if out, err := exec.Command("git", append([]string{"-C", home}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+
+	// Peek shows the myproj mutation, not otherproj's HEAD.
+	var peek struct {
+		Commit  string `json:"commit"`
+		Subject string `json:"subject"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/undo", &peek); code != 200 {
+		t.Fatalf("peek status %d", code)
+	}
+	if peek.Subject != "chore(myproj): done 002_build-board" {
+		t.Fatalf("peek subject = %q", peek.Subject)
+	}
+
+	// A stale hash 409s.
+	if code := send(t, srv, "POST", "/api/projects/myproj/undo",
+		map[string]string{"commit": "0000000000000000000000000000000000000000"}, nil); code != 409 {
+		t.Errorf("stale hash status %d", code)
+	}
+
+	// The real undo restores pending state and the order entry.
+	if code := send(t, srv, "POST", "/api/projects/myproj/undo",
+		map[string]string{"commit": peek.Commit}, nil); code != 200 {
+		t.Fatalf("undo failed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002_build-board.md")); err != nil {
+		t.Errorf("undo did not restore the pending file: %v", err)
+	}
+	order, _ := os.ReadFile(filepath.Join(home, "myproj", "order"))
+	if !strings.Contains(string(order), "002") {
+		t.Errorf("undo did not restore the order entry:\n%s", order)
+	}
+	if s := lastSubject(t, home); !strings.HasPrefix(s, `Revert "chore(myproj): done`) {
+		t.Errorf("revert commit = %q", s)
+	}
+	if status := lastPorcelain(t, home); status != "" {
+		t.Errorf("tree dirty after undo:\n%s", status)
+	}
+
+	// Undoing the undo (redo) is allowed and restores done state.
+	if code := send(t, srv, "POST", "/api/projects/myproj/undo", nil, nil); code != 200 {
+		t.Fatalf("redo failed")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002_build-board.done.md")); err != nil {
+		t.Errorf("redo did not restore done state: %v", err)
+	}
+
+	// A foreign (hand) commit touching the project is refused.
+	probe := filepath.Join(home, "myproj", "notes.txt")
+	if err := os.WriteFile(probe, []byte("hand edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"commit", "-q", "-m", "manual edit"}} {
+		if out, err := exec.Command("git", append([]string{"-C", home}, args...)...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	var refuse struct {
+		Error string `json:"error"`
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/undo", nil, &refuse); code != 409 {
+		t.Errorf("foreign commit undo status %d", code)
+	}
+	if !strings.Contains(refuse.Error, "not a taskman mutation") {
+		t.Errorf("foreign refusal = %q", refuse.Error)
+	}
+}
+
 func TestStaticAndIndex(t *testing.T) {
 	_, srv := testStore(t)
 	for _, path := range []string{"/", "/static/app.css", "/static/board.js", "/static/features.js"} {

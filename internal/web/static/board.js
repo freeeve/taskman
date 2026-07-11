@@ -532,6 +532,17 @@ function renderActions(t) {
   }
 }
 
+// undoLast reverts the project's newest taskman commit after showing the
+// user exactly what it is; the peeked hash rides along so a concurrent
+// change 409s instead of undoing something else.
+function undoLast() {
+  mutate(async () => {
+    const peek = await api(`/api/projects/${state.project}/undo`);
+    if (!confirm(`Undo "${peek.subject}"?`)) return;
+    await post(`/api/projects/${state.project}/undo`, { commit: peek.commit });
+  });
+}
+
 function newTask() {
   const description = prompt("New task description:");
   if (!description || !description.trim()) return;
@@ -569,6 +580,7 @@ function wire() {
   });
   $("#dialog-close").addEventListener("click", () => $("#task-dialog").close());
   $("#new-task").addEventListener("click", newTask);
+  $("#undo").addEventListener("click", undoLast);
 }
 
 // --- external-change freshness: the store is multi-writer (CLI and other

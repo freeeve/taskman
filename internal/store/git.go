@@ -89,6 +89,39 @@ func Commit(dir, msg string, paths []string) error {
 	return nil
 }
 
+// LastProjectCommit returns the newest commit touching the project's
+// directory -- NOT the repo HEAD, because the store is multi-writer and HEAD
+// may belong to another project.
+func LastProjectCommit(home, project string) (hash, subject string, err error) {
+	out, err := exec.Command("git", "-C", home, "log", "-1", "--format=%H%x00%s",
+		"--", project+"/").Output()
+	if err != nil {
+		return "", "", fmt.Errorf("git log: %v", err)
+	}
+	line := strings.TrimSpace(string(out))
+	if line == "" {
+		return "", "", fmt.Errorf("no commits touch project %s", project)
+	}
+	hash, subject, ok := strings.Cut(line, "\x00")
+	if !ok {
+		return "", "", fmt.Errorf("unparseable log entry %q", line)
+	}
+	return hash, subject, nil
+}
+
+// Revert reverts one commit as its own no-edit revert commit, keeping the
+// trail append-only (and the undo itself undoable). A conflicting revert is
+// aborted so the working tree is left clean.
+func Revert(home, hash string) error {
+	commitMu.Lock()
+	defer commitMu.Unlock()
+	if out, err := exec.Command("git", "-C", home, "revert", "--no-edit", hash).CombinedOutput(); err != nil {
+		_ = exec.Command("git", "-C", home, "revert", "--abort").Run()
+		return fmt.Errorf("revert would conflict with later changes: %s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
 // AutoCommit commits task-file paths unless disabled, downgrading git
 // problems to a warning so the ledger operation itself still succeeds. The
 // error is also returned for callers whose contract is stricter (the web

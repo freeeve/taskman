@@ -33,6 +33,8 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/done", s.featureDone)
 	mux.HandleFunc("POST /api/projects/{p}/features/{slug}/reopen", s.featureReopen)
 	mux.HandleFunc("PUT /api/projects/{p}/features/{slug}/tasks", s.featureTasks)
+	mux.HandleFunc("GET /api/projects/{p}/undo", s.undoPeek)
+	mux.HandleFunc("POST /api/projects/{p}/undo", s.undo)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/screenshots", s.uploadScreenshot)
 	mux.HandleFunc("GET /shots/{p}/{n}/{file}", s.serveScreenshot)
 	mux.Handle("GET /static/", http.FileServerFS(staticFS))

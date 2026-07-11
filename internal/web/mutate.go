@@ -2,7 +2,9 @@ package web
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -394,6 +396,75 @@ func findFeatureSlug(projDir, slug string) (store.Feature, error) {
 		}
 	}
 	return store.Feature{}, fmt.Errorf("no feature %q", slug)
+}
+
+// undoable reports whether a commit subject is one this store minted for the
+// project (a taskman mutation or a previous undo of one); anything else --
+// hand commits, seeds, other tools -- is not ours to revert.
+func undoable(subject, project string) bool {
+	return strings.HasPrefix(subject, "chore("+project+"):") ||
+		strings.HasPrefix(subject, `Revert "chore(`+project+`):`)
+}
+
+// undoTarget resolves the project's newest commit and vets it.
+func (s *server) undoTarget(w http.ResponseWriter, r *http.Request) (hash, subject string, ok bool) {
+	if _, err := s.projDir(r); err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return "", "", false
+	}
+	p := r.PathValue("p")
+	hash, subject, err := store.LastProjectCommit(s.home, p)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return "", "", false
+	}
+	if !undoable(subject, p) {
+		writeErr(w, http.StatusConflict,
+			fmt.Errorf("refusing to undo %q: not a taskman mutation for this project", subject))
+		return "", "", false
+	}
+	return hash, subject, true
+}
+
+// undoPeek handles GET undo: what WOULD be undone, so the client can confirm
+// with the user and pass the hash back as its staleness guard.
+func (s *server) undoPeek(w http.ResponseWriter, r *http.Request) {
+	hash, subject, ok := s.undoTarget(w, r)
+	if !ok {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"commit": hash, "subject": subject})
+}
+
+// undo handles POST undo: {"commit"?} reverts the project's newest taskman
+// commit as its own revert commit. A supplied commit hash must still be the
+// newest one -- the store is multi-writer, and undoing something other than
+// what the user confirmed would be worse than refusing.
+func (s *server) undo(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var req struct {
+		Commit string `json:"commit"`
+	}
+	if err := readBody(r, &req); err != nil && !errors.Is(err, io.EOF) {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	hash, subject, ok := s.undoTarget(w, r)
+	if !ok {
+		return
+	}
+	if req.Commit != "" && req.Commit != hash {
+		writeErr(w, http.StatusConflict,
+			fmt.Errorf("the project changed since you looked; refresh and retry"))
+		return
+	}
+	if err := store.Revert(s.home, hash); err != nil {
+		writeErr(w, http.StatusConflict, err)
+		return
+	}
+	fmt.Println("reverted:", subject)
+	writeJSON(w, http.StatusOK, map[string]string{"reverted": hash, "subject": subject})
 }
 
 // today stamps mutations with the same date format as the CLI.

@@ -435,24 +435,23 @@ function render() {
     head.append(count);
     colEl.append(head);
 
-    let capped = false;
-    if (col.status === "done" && !state.showAllDone && tasks.length > DONE_CAP) {
+    const overCap = col.status === "done" && tasks.length > DONE_CAP;
+    if (overCap && !state.showAllDone) {
       tasks = tasks.slice(-DONE_CAP).reverse();
-      capped = true;
     } else if (col.status === "done") {
       tasks = [...tasks].reverse();
     }
     appendCards(colEl, tasks);
 
-    if (capped) {
-      const more = document.createElement("button");
-      more.className = "show-more";
-      more.textContent = "show all done";
-      more.addEventListener("click", () => {
-        state.showAllDone = true;
+    if (overCap) {
+      const toggle = document.createElement("button");
+      toggle.className = "show-more";
+      toggle.textContent = state.showAllDone ? "show fewer" : "show all done";
+      toggle.addEventListener("click", () => {
+        state.showAllDone = !state.showAllDone;
         render();
       });
-      colEl.append(more);
+      colEl.append(toggle);
     }
     if (!tasks.length) {
       const empty = document.createElement("div");

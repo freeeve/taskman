@@ -28,7 +28,7 @@ func testStore(t *testing.T) (string, *httptest.Server) {
 	}
 	files := map[string]string{
 		"001_ship-it.done.md":              "# 001 -- Ship it\n\nDone long ago.\n",
-		"002_build-board.md":               "# 002 -- Build the board\n\nA **bold** plan.\n",
+		"002_build-board.md":               "# 002 -- Build the board\n\nA **bold** plan. See https://example.com/docs and [local](other.md).\n",
 		"003-impl_wire-api.in-progress.md": "# 003 -- Wire the API\n\nBody.\n",
 		"004_held.deferred.md":             "# 004 -- Held\n\nWaiting.\n",
 	}
@@ -46,7 +46,7 @@ func testStore(t *testing.T) (string, *httptest.Server) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(fdir, "kanban.md"),
-		[]byte("# Kanban\n\nTasks: 001, 002, 099\n\n![diag](../screenshots/002/x.png)\n"), 0o644); err != nil {
+		[]byte("# Kanban\n\nTasks: 001, 002, 099\n\n![diag](../screenshots/002/x.png)\n\n[pr](https://github.com/x/1)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("GIT_AUTHOR_NAME", "Test")
@@ -202,6 +202,14 @@ func TestAPITaskDetail(t *testing.T) {
 	if !strings.Contains(data.HTML, "<strong>bold</strong>") {
 		t.Errorf("GFM not rendered: %q", data.HTML)
 	}
+	// Absolute links leave the SPA in a new tab; relative links stay as-is.
+	if !strings.Contains(data.HTML,
+		`<a target="_blank" rel="noopener noreferrer" href="https://example.com/docs"`) {
+		t.Errorf("external link not retargeted: %q", data.HTML)
+	}
+	if !strings.Contains(data.HTML, `<a href="other.md"`) {
+		t.Errorf("relative link must stay untouched: %q", data.HTML)
+	}
 	if code := get(t, srv, "/api/projects/myproj/tasks/99", nil); code != 404 {
 		t.Errorf("missing task status %d", code)
 	}
@@ -235,6 +243,10 @@ func TestAPIFeatures(t *testing.T) {
 	if !strings.Contains(feats[0].HTML, `src="/shots/myproj/002/x.png"`) ||
 		strings.Contains(feats[0].HTML, "../screenshots/") {
 		t.Errorf("feature img src not rewritten: %q", feats[0].HTML)
+	}
+	if !strings.Contains(feats[0].HTML,
+		`<a target="_blank" rel="noopener noreferrer" href="https://github.com/x/1"`) {
+		t.Errorf("feature external link not retargeted: %q", feats[0].HTML)
 	}
 }
 

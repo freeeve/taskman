@@ -227,13 +227,13 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	var html bytes.Buffer
-	if err := markdown.Convert(body, &html); err != nil {
+	rendered, err := renderBody(body, r.PathValue("p"))
+	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"task": toJSON(t), "body": string(body), "html": rewriteShots(html.String(), r.PathValue("p")),
+		"task": toJSON(t), "body": string(body), "html": rendered,
 	})
 }
 
@@ -242,6 +242,26 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 // (../screenshots/NNN/f.png), which no browser route serves directly.
 func rewriteShots(html, project string) string {
 	return strings.ReplaceAll(html, `src="../screenshots/`, `src="/shots/`+project+`/`)
+}
+
+// rewriteLinks opens absolute links in a new tab: the board is a single-page
+// app, and same-tab navigation discards its view state. goldmark always
+// emits href as the first anchor attribute, which is what makes the string
+// rewrite reliable; relative and in-page links stay untouched.
+func rewriteLinks(html string) string {
+	const attrs = `<a target="_blank" rel="noopener noreferrer" href="`
+	html = strings.ReplaceAll(html, `<a href="http://`, attrs+`http://`)
+	return strings.ReplaceAll(html, `<a href="https://`, attrs+`https://`)
+}
+
+// renderBody converts markdown to html with the store-specific rewrites
+// applied; both task bodies and feature specs render through here.
+func renderBody(body []byte, project string) (string, error) {
+	var html bytes.Buffer
+	if err := markdown.Convert(body, &html); err != nil {
+		return "", err
+	}
+	return rewriteLinks(rewriteShots(html.String(), project)), nil
 }
 
 // features returns the project's features with per-linked-task status chips.
@@ -282,9 +302,8 @@ func (s *server) features(w http.ResponseWriter, r *http.Request) {
 	for _, f := range feats {
 		fj := featJSON{Slug: f.Slug, Done: f.Done, Title: f.Title, Tasks: []chip{}}
 		if body, err := os.ReadFile(f.Path()); err == nil {
-			var html bytes.Buffer
-			if err := markdown.Convert(body, &html); err == nil {
-				fj.HTML = rewriteShots(html.String(), r.PathValue("p"))
+			if rendered, err := renderBody(body, r.PathValue("p")); err == nil {
+				fj.HTML = rendered
 			}
 		}
 		for _, n := range f.Tasks {

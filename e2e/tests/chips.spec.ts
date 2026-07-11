@@ -99,6 +99,41 @@ test("acting on a task from its chip updates the chip without a tab switch", asy
   await finishTask(page.request, t.num);
 });
 
+test("acting on a shared task's chip updates that chip in every feature that links it", async ({
+  page,
+}) => {
+  const t = await createTaskViaAPI(page.request, uniqueDesc("chip-shared"));
+  const descA = uniqueDesc("chip-shared-a");
+  const descB = uniqueDesc("chip-shared-b");
+  const slugA = await createFeature(page, descA);
+  const slugB = await createFeature(page, descB);
+  linkTasksToFeature(slugA, [t.num]);
+  linkTasksToFeature(slugB, [t.num]);
+
+  await gotoBoard(page);
+  await openFeature(page, descA);
+  const pad = String(t.num).padStart(3, "0");
+  const chipA = page.locator(`.feature-card[data-slug="${slugA}"] .chip`, { hasText: pad });
+  const chipB = page.locator(`.feature-card[data-slug="${slugB}"] .chip`, { hasText: pad });
+  await expect(chipA).toContainText("pending");
+  await expect(chipB).toContainText("pending");
+
+  // Start the task from feature A's chip; the re-render reflects store state,
+  // so feature B's chip for the same task must update too.
+  await chipA.click();
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    page.locator("#dialog-actions button", { hasText: "start" }).click(),
+  ]);
+  await expect(chipA).toContainText("in-progress");
+  await expect(chipB).toContainText("in-progress");
+
+  await finishTask(page.request, t.num);
+});
+
 test("acting on a chip keeps that feature's open spec panel open", async ({ page }) => {
   const t = await createTaskViaAPI(page.request, uniqueDesc("details-keep"));
   const desc = uniqueDesc("details-keep-feat");

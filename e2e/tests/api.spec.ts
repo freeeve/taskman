@@ -106,6 +106,26 @@ test.describe("error handling", () => {
     expect(res.status()).toBe(400);
     expect((await taskByTitle(request, SEEDS.pendingWeb)).deferred).toBe(false);
   });
+
+  test("rejects an over-long description cleanly without leaking the store path", async ({
+    request,
+  }) => {
+    const tooLong = "a".repeat(300);
+    for (const endpoint of ["features", "tasks"]) {
+      const res = await request.post(`${base}/${endpoint}`, { data: { description: tooLong } });
+      expect(res.status()).toBe(400);
+      const err = (await res.json()).error as string;
+      expect(err).toContain("description too long");
+      // The absolute store path must never reach the client.
+      expect(err).not.toMatch(/\/Users\/|\.taskman\//);
+    }
+  });
+
+  test("still rejects an empty-slug description with a clean message", async ({ request }) => {
+    const res = await request.post(`${base}/features`, { data: { description: "!!!" } });
+    expect(res.status()).toBe(400);
+    expect((await res.json()).error).toContain("empty slug");
+  });
 });
 
 test.describe("GET /api/projects/{p}/features", () => {

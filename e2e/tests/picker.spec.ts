@@ -1,5 +1,13 @@
 import { test, expect, type Page } from "@playwright/test";
-import { PROJECT, selectProjectViaPicker } from "../helpers";
+import {
+  PROJECT,
+  createTaskViaAPI,
+  finishTask,
+  gotoBoard,
+  openCard,
+  selectProjectViaPicker,
+  uniqueDesc,
+} from "../helpers";
 
 /**
  * Searchable project picker (task 021): open via button and ctrl+k, filter
@@ -126,4 +134,24 @@ test("a stale project in localStorage falls back to a real project and still loa
     page.locator("#tab-features").click(),
   ]);
   await expect(page.locator("#features .features-bar")).toBeVisible();
+});
+
+test("ctrl+k is ignored while the task dialog is open, and does not leave the picker stuck open", async ({
+  page,
+}) => {
+  const t = await createTaskViaAPI(page.request, uniqueDesc("picker-dialog"));
+  await gotoBoard(page);
+  await openCard(page, t.num);
+
+  // The dialog is modal (the page behind is inert), so ctrl+k must not open
+  // the picker behind the backdrop (task 070).
+  await page.keyboard.press("Control+k");
+  await expect(page.locator("#picker-panel")).toBeHidden();
+
+  // Closing the dialog must not reveal a picker that ctrl+k left dangling.
+  await page.locator("#dialog-close").click();
+  await expect(page.locator("#task-dialog")).toBeHidden();
+  await expect(page.locator("#picker-panel")).toBeHidden();
+
+  await finishTask(page.request, t.num);
 });

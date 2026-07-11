@@ -286,6 +286,25 @@ function columnDropZone(colEl, status) {
 // card stays a draggable div (a raw button would disturb HTML5 DnD), so
 // keyboard access is grafted on: focusable, role=button, Enter/Space opens
 // the detail dialog. Dragging itself remains pointer-only by design.
+// pushToTop rewrites the priority order with num first, through the same
+// PUT (and single commit) as a drag. The order sent is the pending column's
+// current sequence, so unlisted tasks keep their relative order; pressing
+// it on the already-top task is a no-op, not an empty commit.
+function pushToTop(num) {
+  const pending = state.tasks
+    .filter((t) => t.status === "pending" && !t.deferred)
+    .map((t) => t.num);
+  if (pending[0] === num) return;
+  const order = [num, ...pending.filter((n) => n !== num)];
+  mutate(() =>
+    api(`/api/projects/${state.project}/order`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ order }),
+    })
+  ).then(() => focusAfterRender(`#board [data-num="${num}"]`, "#tab-tasks"));
+}
+
 function card(t) {
   const el = document.createElement("div");
   el.className = "card" + (t.deferred ? " deferred" : "");
@@ -294,6 +313,9 @@ function card(t) {
   el.tabIndex = 0;
   el.setAttribute("role", "button");
   el.addEventListener("keydown", (e) => {
+    // Only the card's own keys: an Enter on the to-top button bubbles here
+    // and must not also open the dialog.
+    if (e.target !== el) return;
     if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       openTask(t.num).catch((err) => alert(err.message || err));
@@ -318,6 +340,19 @@ function card(t) {
     def.className = "badge deferred";
     def.textContent = "deferred";
     meta.append(def);
+  }
+  if (t.status === "pending" && !t.deferred) {
+    const top = document.createElement("button");
+    top.type = "button";
+    top.className = "to-top";
+    top.textContent = "⤒";
+    top.title = "move to top of priority";
+    top.setAttribute("aria-label", `move task ${t.num} to top of priority`);
+    top.addEventListener("click", (e) => {
+      e.stopPropagation();
+      pushToTop(t.num);
+    });
+    meta.append(top);
   }
   el.append(meta);
 

@@ -161,6 +161,22 @@ main#board {
 
 .card.deferred { opacity: 0.65; }
 
+.card .to-top {
+  margin-left: auto;
+  padding: 0 6px;
+  font-size: 12px;
+  line-height: 16px;
+  background: none;
+  border: 1px solid transparent;
+  color: var(--text-dim);
+  border-radius: 6px;
+}
+
+.card .to-top:hover, .card .to-top:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
 .card.dragging { opacity: 0.4; }
 .card.drop-above { box-shadow: 0 -2px 0 0 var(--accent); }
 .column.drop-target { outline: 2px dashed var(--accent); outline-offset: -4px; }

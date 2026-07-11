@@ -146,15 +146,16 @@ test("the to-bottom button sends a pending task to the tail of priority in one r
   await finishTask(page.request, b.num);
 });
 
-test("the to-top and to-bottom buttons stack vertically, up above down (task 096)", async ({
+test("the priority buttons stack vertically in a gutter without inflating the meta row (tasks 096, 097)", async ({
   page,
 }) => {
   // The two priority controls read better stacked (up = top, down = bottom)
-  // than side by side; guard the orientation so a CSS change cannot silently
-  // revert it.
+  // than side by side (096); guard the orientation. They also live in an
+  // absolute right gutter so the two-high stack does not inflate the meta row
+  // and push the title down (097) -- guard that the meta stays one line.
   const t = await createTaskViaUI(page, uniqueDesc("stack"));
-  const box = async (sel: string) =>
-    page.locator(`.column.pending .card[data-num="${t.num}"] ${sel}`).boundingBox();
+  const cardSel = `.column.pending .card[data-num="${t.num}"]`;
+  const box = async (sel: string) => page.locator(`${cardSel} ${sel}`).boundingBox();
   const top = await box(".to-top");
   const bottom = await box(".to-bottom");
   expect(top && bottom).toBeTruthy();
@@ -163,6 +164,17 @@ test("the to-top and to-bottom buttons stack vertically, up above down (task 096
   // Both share the same horizontal column (centers aligned within a pixel or two).
   const cx = (b: { x: number; width: number }) => b.x + b.width / 2;
   expect(Math.abs(cx(top!) - cx(bottom!))).toBeLessThan(3);
+
+  // The stack must not inflate the meta row: it is a single line (~16px), so
+  // the title stays put rather than being shoved down by two button heights.
+  const meta = await box(".meta");
+  expect(meta!.height).toBeLessThan(24);
+  // The controls are out of normal flow (absolute), which is what keeps the
+  // meta row from growing to fit them.
+  const position = await page.locator(`${cardSel} .priority-controls`).evaluate(
+    (el) => getComputedStyle(el).position
+  );
+  expect(position).toBe("absolute");
 
   await finishTask(page.request, t.num);
 });

@@ -94,3 +94,24 @@ test("the /shots/ route refuses dotfiles and unknown files", async ({ request })
   const missing = await request.get(`${BASE_URL}/shots/${PROJECT}/999/nope.png`);
   expect(missing.status()).toBe(404);
 });
+
+test("the /shots/ route resists path traversal and never discloses files", async ({ request }) => {
+  // Every path segment is validated (project slug, numeric id, filename with no
+  // dot prefix and no separators), so these disclosure vectors must all 404 and
+  // never return file bytes. Encoded slashes/dots exercise the mux + handler.
+  const vectors = [
+    `${PROJECT}/1/..%2f..%2f..%2f..%2fetc%2fpasswd`, // encoded slashes climbing out
+    `${PROJECT}/1/%2e%2e%2f%2e%2e%2fetc%2fpasswd`, // encoded dots and slashes
+    `${PROJECT}/1/..%2f..%2fapp.css`, // reach a real app file outside screenshots
+    `${PROJECT}/0/x.png`, // non-positive id
+    `Not_A_Slug/1/x.png`, // project name failing the slug guard
+    `${PROJECT}/1/..`, // bare parent ref
+  ];
+  for (const v of vectors) {
+    const res = await request.get(`${BASE_URL}/shots/${v}`, { maxRedirects: 0 });
+    expect(res.status(), `expected 404 for ${v}`).toBe(404);
+    // Belt and suspenders: even on any non-404, no system file bytes leak.
+    const body = await res.text();
+    expect(body, `disclosed file for ${v}`).not.toMatch(/root:.*:0:0:|-----BEGIN/);
+  }
+});

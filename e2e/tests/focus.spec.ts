@@ -162,8 +162,10 @@ test("features: focus lands on the shipped card's spec after ship it", async ({ 
 
   // Ship it re-renders the features view: the button is replaced by a
   // "shipped" badge, so focus must land on the card's spec summary, not body.
+  // Shipping now asks confirm() first, so accept it.
   const ship = page.locator(cardSel).locator("button", { hasText: "ship it" });
   await ship.focus();
+  page.once("dialog", (d) => d.accept());
   await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes(`${PROJECT}/features`) && r.request().method() === "GET"
@@ -171,6 +173,17 @@ test("features: focus lands on the shipped card's spec after ship it", async ({ 
     ship.click(),
   ]);
   await expect(page.locator(cardSel).locator(".badge", { hasText: "shipped" })).toBeVisible();
+  await expect(page.locator(`${cardSel} summary`)).toBeFocused();
+
+  // Unship also re-renders (badge -> "ship it" button); focus must return to
+  // the card's spec summary too.
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    page.locator(cardSel).locator("button", { hasText: "unship" }).click(),
+  ]);
+  await expect(page.locator(cardSel).locator("button", { hasText: "ship it" })).toBeVisible();
   await expect(page.locator(`${cardSel} summary`)).toBeFocused();
 
   removeFeatureBySlug(slug);

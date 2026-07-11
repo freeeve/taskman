@@ -97,6 +97,8 @@ test("ship it marks the feature shipped and renames its file", async ({ page }) 
   const desc = uniqueDesc("feature-ship");
   const card = await createFeatureViaUI(page, desc);
 
+  // Shipping is now confirmed; accept the confirm() dialog.
+  page.once("dialog", (d) => d.accept());
   await Promise.all([
     page.waitForResponse(
       (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"

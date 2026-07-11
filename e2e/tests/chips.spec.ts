@@ -220,3 +220,45 @@ test("marking a deferred task done clears the deferral: the chip shows plain don
   await expect(doneChip).toHaveClass(/chip done/);
   await expect(doneChip).not.toContainText("deferred");
 });
+
+test("a feature card shows the done-task rollup (missing counts in the denominator) and updates live", async ({
+  page,
+}) => {
+  const doneTask = await createTaskViaAPI(page.request, uniqueDesc("rollup-done"));
+  await setStatusViaAPI(page.request, doneTask.num, "done");
+  const pendingTask = await createTaskViaAPI(page.request, uniqueDesc("rollup-pending"));
+  const desc = uniqueDesc("rollup-feat");
+  const slug = await createFeature(page, desc);
+  // One done, one pending, one missing number: the rollup counts done over ALL
+  // linked numbers, matching `taskman feature list` (missing counts too).
+  linkTasksToFeature(slug, [doneTask.num, pendingTask.num, 999999]);
+
+  await gotoBoard(page);
+  const card = await openFeature(page, desc);
+  await expect(card.locator(".rollup")).toHaveText("1/3 tasks done");
+
+  // Marking the pending task done updates the rollup in place.
+  const pad = String(pendingTask.num).padStart(3, "0");
+  await card.locator(".chip", { hasText: pad }).click();
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    page.locator("#dialog-actions button", { hasText: "done" }).click(),
+  ]);
+  await expect(page.locator(`.feature-card[data-slug="${slug}"] .rollup`)).toHaveText(
+    "2/3 tasks done"
+  );
+});
+
+test("a feature with no linked tasks shows no rollup", async ({ page }) => {
+  const desc = uniqueDesc("rollup-empty");
+  const slug = await createFeature(page, desc);
+
+  await gotoBoard(page);
+  const card = await openFeature(page, desc);
+  await expect(card).toBeVisible();
+  await expect(card.locator(".rollup")).toHaveCount(0);
+  await expect(card.locator(".chips")).toHaveCount(0);
+});

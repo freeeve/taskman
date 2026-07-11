@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -42,10 +43,19 @@ func gitRetry(verb string, args []string) error {
 	return lastErr
 }
 
+// commitMu serializes the add+commit pair within this process: the two git
+// invocations are not atomic, and concurrent goroutines (the web server's
+// handlers) interleaving on the shared index can leave a mutation staged or
+// untracked while both report success. Cross-process collisions (a CLI run
+// against a live server) are covered by gitRetry's index.lock backoff.
+var commitMu sync.Mutex
+
 // Commit stages exactly the given paths and commits them with a pathspec,
 // so a concurrent session's staged work in the same repo is never swept into
 // the commit. Paths that neither exist nor are tracked are skipped.
 func Commit(dir, msg string, paths []string) error {
+	commitMu.Lock()
+	defer commitMu.Unlock()
 	if !gitDir(dir) {
 		return fmt.Errorf("%s is not in a git repository", dir)
 	}
@@ -67,14 +77,18 @@ func Commit(dir, msg string, paths []string) error {
 }
 
 // AutoCommit commits task-file paths unless disabled, downgrading git
-// problems to a warning so the ledger operation itself still succeeds.
-func AutoCommit(noCommit bool, dir, msg string, paths ...string) {
+// problems to a warning so the ledger operation itself still succeeds. The
+// error is also returned for callers whose contract is stricter (the web
+// API tells its client when a mutation was applied but not committed); CLI
+// callers deliberately ignore it.
+func AutoCommit(noCommit bool, dir, msg string, paths ...string) error {
 	if noCommit {
-		return
+		return nil
 	}
 	if err := Commit(dir, msg, paths); err != nil {
 		fmt.Fprintf(os.Stderr, "taskman: not committed (%v)\n", err)
-		return
+		return err
 	}
 	fmt.Println("committed:", msg)
+	return nil
 }

@@ -1,10 +1,12 @@
 package store
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -156,6 +158,45 @@ func TestProjects(t *testing.T) {
 	}
 	if strings.Join(names, " ") != "alpha beta" {
 		t.Errorf("Projects = %v (dotdirs and files must be excluded, sorted)", names)
+	}
+}
+
+// TestConcurrentCommits pins commit atomicity within a process: concurrent
+// Commit calls race the shared index (add and commit are separate git
+// invocations), and every one must land -- no file left staged or untracked
+// while its caller believes it succeeded.
+func TestConcurrentCommits(t *testing.T) {
+	home := testHome(t)
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	const n = 12
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			path := filepath.Join(home, fmt.Sprintf("f%02d.txt", i))
+			if err := os.WriteFile(path, []byte("x\n"), 0o644); err != nil {
+				errs[i] = err
+				return
+			}
+			errs[i] = Commit(home, fmt.Sprintf("chore(store): concurrent %02d", i), []string{path})
+		}()
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Errorf("commit %02d: %v", i, err)
+		}
+	}
+	if status := gitOut(t, home, "status", "--porcelain"); status != "" {
+		t.Errorf("working tree not clean after concurrent commits:\n%s", status)
+	}
+	// Seed commit + one per goroutine.
+	if count := gitOut(t, home, "rev-list", "--count", "HEAD"); count != fmt.Sprint(n+1) {
+		t.Errorf("commit count = %s, want %d", count, n+1)
 	}
 }
 

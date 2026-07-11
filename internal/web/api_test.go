@@ -3,6 +3,7 @@ package web
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -10,7 +11,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -412,6 +415,65 @@ func TestAPIFeatureMutations(t *testing.T) {
 	if code := send(t, srv, "POST", "/api/projects/myproj/features/nope/done", nil, nil); code != 404 {
 		t.Errorf("missing feature status %d", code)
 	}
+}
+
+// TestConcurrentMutationsAllCommitted pins the API's audit-trail contract
+// under concurrency: N parallel creates must all succeed AND all land as
+// commits, leaving the store working tree clean -- no straggler staged or
+// untracked while its request got a 2xx.
+func TestConcurrentMutationsAllCommitted(t *testing.T) {
+	home, srv := testStore(t)
+	before, err := exec.Command("git", "-C", home, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	const n = 12
+	codes := make([]int, n)
+	errs := make([]error, n)
+	var wg sync.WaitGroup
+	for i := range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			body := fmt.Sprintf(`{"description":"Conc feature %02d"}`, i)
+			res, err := http.Post(srv.URL+"/api/projects/myproj/features",
+				"application/json", strings.NewReader(body))
+			if err != nil {
+				errs[i] = err
+				return
+			}
+			res.Body.Close()
+			codes[i] = res.StatusCode
+		}()
+	}
+	wg.Wait()
+	for i := range n {
+		if errs[i] != nil || codes[i] != 201 {
+			t.Errorf("create %02d: code %d err %v", i, codes[i], errs[i])
+		}
+	}
+	if status := lastPorcelain(t, home); status != "" {
+		t.Errorf("store dirty after concurrent creates:\n%s", status)
+	}
+	after, err := exec.Command("git", "-C", home, "rev-list", "--count", "HEAD").Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := strconv.Atoi(strings.TrimSpace(string(before)))
+	a, _ := strconv.Atoi(strings.TrimSpace(string(after)))
+	if a != b+n {
+		t.Errorf("commit count %d -> %d, want +%d", b, a, n)
+	}
+}
+
+// lastPorcelain returns git status --porcelain for the store.
+func lastPorcelain(t *testing.T, home string) string {
+	t.Helper()
+	out, err := exec.Command("git", "-C", home, "status", "--porcelain").CombinedOutput()
+	if err != nil {
+		t.Fatalf("git status: %v: %s", err, out)
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // pngBytes is a valid 1x1 PNG, enough for content sniffing and serving.

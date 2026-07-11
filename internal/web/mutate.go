@@ -14,9 +14,23 @@ import (
 )
 
 // commit runs the same auto-commit convention as the CLI, so a drag in the
-// browser and a command in a terminal leave identical history.
-func (s *server) commit(project, msg string, paths ...string) {
-	store.AutoCommit(false, s.home, fmt.Sprintf("chore(%s): %s", project, msg), paths...)
+// browser and a command in a terminal leave identical history. Unlike the
+// CLI, the web contract is strict: a failure must reach the client, so
+// handlers route their success response through commitOK.
+func (s *server) commit(project, msg string, paths ...string) error {
+	return store.AutoCommit(false, s.home, fmt.Sprintf("chore(%s): %s", project, msg), paths...)
+}
+
+// commitOK reports whether the commit succeeded, answering 500 with an
+// explicit applied-but-not-committed error when it did not -- the mutation
+// is on disk either way, and pretending otherwise hides audit-trail gaps.
+func (s *server) commitOK(w http.ResponseWriter, project, msg string, paths ...string) bool {
+	if err := s.commit(project, msg, paths...); err != nil {
+		writeErr(w, http.StatusInternalServerError,
+			fmt.Errorf("change applied but not committed: %v", err))
+		return false
+	}
+	return true
 }
 
 // readBody decodes a JSON request body into v.
@@ -56,7 +70,9 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	s.commit(r.PathValue("p"), "open "+t.Stem(), t.Path())
+	if !s.commitOK(w, r.PathValue("p"), "open "+t.Stem(), t.Path()) {
+		return
+	}
 	writeJSON(w, http.StatusCreated, toJSON(t))
 }
 
@@ -110,7 +126,9 @@ func (s *server) setStatus(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	verb := map[task.Status]string{task.InProgress: "start", task.Done: "done", task.Pending: "reopen"}[target]
-	s.commit(r.PathValue("p"), fmt.Sprintf("%s %s", verb, nt.Stem()), paths...)
+	if !s.commitOK(w, r.PathValue("p"), fmt.Sprintf("%s %s", verb, nt.Stem()), paths...) {
+		return
+	}
 	writeJSON(w, http.StatusOK, toJSON(nt))
 }
 
@@ -145,7 +163,9 @@ func (s *server) deferTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
-	s.commit(r.PathValue("p"), fmt.Sprintf("defer %s (%s)", nt.Stem(), reason), t.Path(), nt.Path())
+	if !s.commitOK(w, r.PathValue("p"), fmt.Sprintf("defer %s (%s)", nt.Stem(), reason), t.Path(), nt.Path()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, toJSON(nt))
 }
 
@@ -166,7 +186,9 @@ func (s *server) resumeTask(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusConflict, err)
 		return
 	}
-	s.commit(r.PathValue("p"), "resume "+nt.Stem(), t.Path(), nt.Path())
+	if !s.commitOK(w, r.PathValue("p"), "resume "+nt.Stem(), t.Path(), nt.Path()) {
+		return
+	}
 	writeJSON(w, http.StatusOK, toJSON(nt))
 }
 
@@ -190,7 +212,9 @@ func (s *server) setOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.commit(r.PathValue("p"), "reorder tasks", path)
+	if !s.commitOK(w, r.PathValue("p"), "reorder tasks", path) {
+		return
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -217,7 +241,9 @@ func (s *server) createFeature(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, code, err)
 		return
 	}
-	s.commit(r.PathValue("p"), "feature "+f.Slug, f.Path())
+	if !s.commitOK(w, r.PathValue("p"), "feature "+f.Slug, f.Path()) {
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]any{"slug": f.Slug, "done": false})
 }
 
@@ -255,7 +281,9 @@ func (s *server) featureDone(w http.ResponseWriter, r *http.Request) {
 			writeErr(w, code, err)
 			return
 		}
-		s.commit(r.PathValue("p"), "feature done "+nf.Slug, f.Path(), nf.Path())
+		if !s.commitOK(w, r.PathValue("p"), "feature done "+nf.Slug, f.Path(), nf.Path()) {
+			return
+		}
 		writeJSON(w, http.StatusOK, map[string]any{"slug": nf.Slug, "done": true})
 		return
 	}

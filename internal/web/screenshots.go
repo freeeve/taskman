@@ -91,7 +91,9 @@ func (s *server) uploadScreenshot(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	s.commit(r.PathValue("p"), "screenshot for "+t.Stem(), path, t.Path())
+	if !s.commitOK(w, r.PathValue("p"), "screenshot for "+t.Stem(), path, t.Path()) {
+		return
+	}
 	writeJSON(w, http.StatusCreated, map[string]string{
 		"path": fmt.Sprintf("screenshots/%03d/%s", t.Num, name),
 	})

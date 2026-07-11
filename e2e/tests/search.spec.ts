@@ -1,0 +1,99 @@
+import { test, expect } from "@playwright/test";
+import {
+  BASE_URL,
+  PROJECT,
+  createTaskViaAPI,
+  finishTask,
+  gotoBoard,
+  storeIsLocal,
+  uniqueDesc,
+} from "../helpers";
+
+/**
+ * Global full-text search (task 084): GET /api/search?q= is cross-project over
+ * task and feature titles + bodies. The in-memory index rebuilds when the
+ * store's git HEAD moves, so a just-committed mutation is searchable at once.
+ * These specs create sandbox docs with distinctive tokens; they need the store
+ * local so the server indexes the same store the suite writes.
+ */
+
+const base = `${BASE_URL}/api/projects/${PROJECT}`;
+
+test.skip(() => !storeIsLocal(), "store is not local to the test runner");
+
+/** A distinctive, collision-proof lowercase-alphanumeric token. */
+function token(tag: string): string {
+  return `zq${tag}${Date.now()}`;
+}
+
+test("search finds a task by a distinctive token, with its project and identity", async ({
+  request,
+}) => {
+  const tok = token("task");
+  const t = await createTaskViaAPI(request, `search probe ${tok}`);
+
+  const hits = await (await request.get(`${BASE_URL}/api/search?q=${tok}`)).json();
+  const hit = hits.find((h: { num: number }) => h.num === t.num);
+  expect(hit, "the new task should be searchable at once (index tracks HEAD)").toBeTruthy();
+  expect(hit.project).toBe(PROJECT);
+  expect(hit.kind).toBe("task");
+  expect(hit.title).toContain(tok);
+
+  await finishTask(request, t.num);
+});
+
+test("search finds a feature by a body token; a non-matching query is empty", async ({
+  request,
+}) => {
+  const tok = token("feat");
+  const created = await request.post(`${base}/features`, {
+    data: { description: `feature search ${tok}` },
+  });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+
+  const hits = await (await request.get(`${BASE_URL}/api/search?q=${tok}`)).json();
+  const hit = hits.find((h: { slug: string; kind: string }) => h.slug === slug && h.kind === "feature");
+  expect(hit).toBeTruthy();
+  expect(hit.project).toBe(PROJECT);
+
+  // A token that appears nowhere returns no hits (empty array, not an error).
+  const none = await request.get(`${BASE_URL}/api/search?q=zznever${tok}`);
+  expect(none.status()).toBe(200);
+  expect(await none.json()).toEqual([]);
+});
+
+test("multi-term search requires every term (AND)", async ({ request }) => {
+  const a = token("alpha");
+  const b = token("beta");
+  const both = await createTaskViaAPI(request, `${a} ${b} together`);
+  const onlyA = await createTaskViaAPI(request, `${a} by itself`);
+
+  const hits = await (await request.get(`${BASE_URL}/api/search?q=${a}+${b}`)).json();
+  const nums = hits.map((h: { num: number }) => h.num);
+  expect(nums).toContain(both.num);
+  expect(nums, "a doc missing one term must not match the AND query").not.toContain(onlyA.num);
+
+  await finishTask(request, both.num);
+  await finishTask(request, onlyA.num);
+});
+
+test("an empty query is a clean 400, not a whole-store dump", async ({ request }) => {
+  const res = await request.get(`${BASE_URL}/api/search?q=`);
+  expect(res.status()).toBe(400);
+});
+
+test("the header search box lists results as you type", async ({ page, request }) => {
+  const tok = token("uibox");
+  const t = await createTaskViaAPI(request, `ui search ${tok}`);
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/search")),
+    page.locator("#search").fill(tok),
+  ]);
+  const row = page.locator("#search-results .search-row", { hasText: tok });
+  await expect(row).toBeVisible();
+
+  await finishTask(request, t.num);
+});

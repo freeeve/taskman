@@ -56,13 +56,17 @@ function featureCard(f, specOpen) {
     rollup.textContent = `${done}/${f.tasks.length} tasks done`;
     head.append(rollup);
   }
-  const shipAction = (route) => () =>
-    post(`/api/projects/${state.project}/features/${f.slug}/${route}`)
-      .then(loadFeatures)
-      .then(() =>
-        focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features")
-      )
-      .catch((err) => alert(err.message || err));
+  // Mirrors mutate(): the refresh runs whether the POST succeeded or 409'd,
+  // so a stale card self-corrects to server state after a lost race.
+  const shipAction = (route) => async () => {
+    try {
+      await post(`/api/projects/${state.project}/features/${f.slug}/${route}`);
+    } catch (err) {
+      alert(err.message || err);
+    }
+    await loadFeatures().catch(showError);
+    focusAfterRender(`#features [data-slug="${f.slug}"] summary`, "#tab-features");
+  };
   if (f.done) {
     const badge = document.createElement("span");
     badge.className = "badge";

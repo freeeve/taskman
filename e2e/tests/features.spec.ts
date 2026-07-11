@@ -290,3 +290,104 @@ test("a spec's GFM task list renders read-only checkboxes", async ({ page, reque
   await expect(boxes.nth(0)).toBeDisabled();
   await expect(boxes.nth(1)).toBeDisabled();
 });
+
+test("the link picker links then unlinks a task, updating its chip and the rollup", async ({
+  page,
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // Feature task-linking from the UI (task 077): a per-card picker toggles a
+  // task's membership on the Tasks: line via PUT, and the chip + rollup follow.
+  // Before this, links could only be authored by editing the file on disk,
+  // which is why real projects' feature maps stayed empty.
+  const t = await createTaskViaAPI(request, uniqueDesc("uilink-task"));
+  const desc = uniqueDesc("uilink-feat");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  const pad = String(t.num).padStart(3, "0");
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await expect(card).toBeVisible();
+  await expect(card.locator(".chip", { hasText: pad })).toHaveCount(0);
+
+  // Link: open the picker, filter to the task, click its row.
+  await card.locator("button.link-btn").click();
+  const panel = card.locator(".link-panel");
+  await expect(panel).toBeVisible();
+  await panel.locator("input").fill(pad);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/features/${slug}/tasks`) && r.request().method() === "PUT"
+    ),
+    panel.locator("li", { hasText: pad }).first().click(),
+  ]);
+  await expect(card.locator(".chip", { hasText: pad })).toContainText("pending");
+  await expect(card.locator(".rollup")).toContainText("0/1 tasks done");
+
+  // Unlink: the row is now marked linked; clicking it removes the task.
+  await card.locator("button.link-btn").click();
+  const panel2 = card.locator(".link-panel");
+  await panel2.locator("input").fill(pad);
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/features/${slug}/tasks`) && r.request().method() === "PUT"
+    ),
+    panel2.locator("li.linked", { hasText: pad }).click(),
+  ]);
+  await expect(card.locator(".chip", { hasText: pad })).toHaveCount(0);
+  await expect(card.locator(".rollup")).toHaveCount(0);
+
+  await finishTask(request, t.num);
+});
+
+test("the + task button on a feature creates a task already linked to it", async ({
+  page,
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  const desc = uniqueDesc("uiaddtask-feat");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await expect(card).toBeVisible();
+  await expect(card.locator(".chip")).toHaveCount(0);
+
+  // + task prompts for a description and creates the task already linked.
+  const taskDesc = uniqueDesc("uiaddtask");
+  page.once("dialog", (d) => d.accept(taskDesc));
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    card.locator("button", { hasText: "+ task" }).click(),
+  ]);
+
+  await expect(card.locator(".chip")).toHaveCount(1);
+  await expect(card.locator(".chip")).toContainText("pending");
+  await expect(card.locator(".rollup")).toContainText("0/1 tasks done");
+
+  // The new task really exists and is the one linked on the feature.
+  const feats = await (await request.get(`${base}/features`)).json();
+  const f = feats.find((x: { slug: string }) => x.slug === slug);
+  expect(f.tasks).toHaveLength(1);
+  const num = f.tasks[0].num as number;
+  const { tasks } = await (await request.get(`${base}/tasks`)).json();
+  expect(tasks.find((x: { num: number }) => x.num === num).title).toBe(taskDesc);
+
+  await finishTask(request, num);
+});

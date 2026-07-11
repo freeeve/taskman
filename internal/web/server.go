@@ -25,6 +25,7 @@ func Handler(home string) http.Handler {
 	mux.HandleFunc("GET /api/projects/{p}/tasks/{n}", s.taskDetail)
 	mux.HandleFunc("GET /api/projects/{p}/features", s.features)
 	mux.HandleFunc("POST /api/projects/{p}/tasks", s.createTask)
+	mux.HandleFunc("PUT /api/projects/{p}/tasks/{n}", s.editTask)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/status", s.setStatus)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/defer", s.deferTask)
 	mux.HandleFunc("POST /api/projects/{p}/tasks/{n}/resume", s.resumeTask)

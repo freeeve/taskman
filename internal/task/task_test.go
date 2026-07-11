@@ -338,6 +338,65 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
+// TestRetitle pins editing: H1 restamped to the numbered form, file renamed
+// to the new slug with lane/status/deferral kept, same-slug edits restamp
+// only, and an existing target refuses rather than clobbers.
+func TestRetitle(t *testing.T) {
+	dir := ledger(t, "007_taken.md")
+	path := filepath.Join(dir, "012-impl_old-name.in-progress.md")
+	if err := os.WriteFile(path, []byte("# 012 -- Old name\n\nBody stays.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tasks, _ := Load(dir)
+	tk, err := Find(tasks, "12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	nt, err := tk.Retitle("Shiny new name")
+	if err != nil || nt.File != "012-impl_shiny-new-name.in-progress.md" {
+		t.Fatalf("retitle: %v %+v", err, nt)
+	}
+	data, _ := os.ReadFile(nt.Path())
+	if !strings.HasPrefix(string(data), "# 012 -- Shiny new name\n") ||
+		!strings.Contains(string(data), "Body stays.") {
+		t.Errorf("body after retitle:\n%s", data)
+	}
+	// Same slug: restamp only, no rename.
+	nt2, err := nt.Retitle("Shiny NEW name")
+	if err != nil || nt2.File != nt.File {
+		t.Fatalf("same-slug retitle: %v %+v", err, nt2)
+	}
+	data, _ = os.ReadFile(nt2.Path())
+	if !strings.HasPrefix(string(data), "# 012 -- Shiny NEW name\n") {
+		t.Errorf("H1 not restamped: %s", data)
+	}
+	// Clobber refusal: 007_taken.md exists.
+	seven := Task{Dir: dir, File: "007_taken.md", Num: 7, HasNum: true, Slug: "taken"}
+	other := Task{Dir: dir, File: "012-impl_shiny-new-name.in-progress.md", Num: 12, HasNum: true,
+		Lane: "impl", Slug: "shiny-new-name", Status: InProgress}
+	_ = seven
+	if _, err := other.SetLane(""); err != nil {
+		t.Fatal(err)
+	}
+	tasks, _ = Load(dir)
+	tw, _ := Find(tasks, "7")
+	if _, err := tw.Retitle("!!!"); err == nil {
+		t.Error("empty slug must be refused")
+	}
+	renamed, _ := Find(tasks, "12")
+	if err := os.WriteFile(filepath.Join(dir, "012_taken.in-progress.md"), []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := renamed.Retitle("Taken"); err == nil ||
+		!strings.Contains(err.Error(), "refusing to overwrite") {
+		t.Errorf("clobber refusal = %v", err)
+	}
+	ask := Task{Dir: dir, File: "qbd_x.md", Prefix: "qbd", Slug: "x"}
+	if _, err := ask.Retitle("New"); err == nil {
+		t.Error("unadopted ask must refuse Retitle")
+	}
+}
+
 // TestCheckSlug pins up-front length validation: creation must fail with a
 // clean message before the filesystem gets to reject the name.
 func TestCheckSlug(t *testing.T) {

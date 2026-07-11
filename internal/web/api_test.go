@@ -835,6 +835,81 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestEditTask pins the edit endpoint: body replacement re-renders and
+// commits once, a title change renames safely with tokens kept, raw HTML in
+// an edited body stays neutralized, and clobber/empty edits answer cleanly.
+func TestEditTask(t *testing.T) {
+	home, srv := testStore(t)
+	dir := filepath.Join(home, "myproj", "tasks")
+
+	// Body edit: full raw markdown replacement.
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2",
+		map[string]string{"body": "# 002 -- Build the board\n\nRewritten <script>alert(1)</script> body.\n"},
+		nil); code != 200 {
+		t.Fatalf("body edit status %d", code)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): edit 002_build-board" {
+		t.Errorf("edit commit = %q", s)
+	}
+	var detail struct {
+		Body string `json:"body"`
+		HTML string `json:"html"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/2", &detail); code != 200 {
+		t.Fatal("detail failed")
+	}
+	if !strings.Contains(detail.Body, "Rewritten") {
+		t.Errorf("body not replaced: %q", detail.Body)
+	}
+	if strings.Contains(detail.HTML, "<script>") {
+		t.Errorf("raw HTML must stay neutralized: %q", detail.HTML)
+	}
+
+	// Title edit: rename with status kept; H1 restamped.
+	var edited struct {
+		File string `json:"file"`
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/3",
+		map[string]string{"title": "Wire the whole API"}, &edited); code != 200 {
+		t.Fatalf("title edit status %d", code)
+	}
+	if edited.File != "003-impl_wire-the-whole-api.in-progress.md" {
+		t.Errorf("renamed file = %q (lane and status must survive)", edited.File)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, edited.File))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(string(body), "# 003 -- Wire the whole API\n") {
+		t.Errorf("H1 not restamped:\n%s", body)
+	}
+
+	// A deferred task's marker survives a retitle (clobber refusal itself is
+	// unit-tested in the task package -- it needs a duplicate number).
+	var deferredEdit struct {
+		File     string `json:"file"`
+		Deferred bool   `json:"deferred"`
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/4",
+		map[string]string{"title": "Still held"}, &deferredEdit); code != 200 {
+		t.Fatalf("deferred retitle status %d", code)
+	}
+	if deferredEdit.File != "004_still-held.deferred.md" || !deferredEdit.Deferred {
+		t.Errorf("deferred retitle = %+v", deferredEdit)
+	}
+	// Empty edit 400s; unknown task 404s.
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2", map[string]string{}, nil); code != 400 {
+		t.Errorf("empty edit status %d", code)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/99",
+		map[string]string{"body": "x"}, nil); code != 404 {
+		t.Errorf("unknown task status %d", code)
+	}
+	if status := lastPorcelain(t, home); status != "" {
+		t.Errorf("tree dirty after edits:\n%s", status)
+	}
+}
+
 // TestActivity pins the audit-trail view: newest-first project-scoped
 // commits with stripped summaries and commit-metadata timestamps; other
 // projects' commits do not bleed in.

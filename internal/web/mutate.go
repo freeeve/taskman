@@ -398,6 +398,63 @@ func findFeatureSlug(projDir, slug string) (store.Feature, error) {
 	return store.Feature{}, fmt.Errorf("no feature %q", slug)
 }
 
+// editTask handles PUT tasks/{n}: {"title"?, "body"?} rewrites the task file
+// (body is the full raw markdown, exactly what GET returns) and/or retitles
+// it -- H1 restamped and file renamed to the new slug with number, lane,
+// status, and deferral kept, refusing to clobber. Tasks were create-only
+// from the UI before this.
+func (s *server) editTask(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req struct {
+		Title string `json:"title"`
+		Body  string `json:"body"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	if req.Title == "" && req.Body == "" {
+		writeErr(w, http.StatusBadRequest, fmt.Errorf("nothing to edit: pass title and/or body"))
+		return
+	}
+	t, err := findByKey(projDir, r.PathValue("n"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	paths := []string{t.Path()}
+	if req.Body != "" {
+		body := strings.TrimRight(req.Body, "\n") + "\n"
+		if err := os.WriteFile(t.Path(), []byte(body), 0o644); err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+	}
+	if req.Title != "" {
+		nt, err := t.Retitle(strings.TrimSpace(req.Title))
+		if err != nil {
+			code := http.StatusBadRequest
+			if strings.Contains(err.Error(), "refusing to overwrite") {
+				code = http.StatusConflict
+			}
+			writeErr(w, code, err)
+			return
+		}
+		paths = append(paths, nt.Path())
+		t = nt
+	}
+	if !s.commitOK(w, r.PathValue("p"), "edit "+t.Stem(), paths...) {
+		return
+	}
+	writeJSON(w, http.StatusOK, toJSON(t))
+}
+
 // undoable reports whether a commit subject is one this store minted for the
 // project (a taskman mutation or a previous undo of one); anything else --
 // hand commits, seeds, other tools -- is not ours to revert.

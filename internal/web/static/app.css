@@ -236,6 +236,32 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
   border-top: 1px solid var(--border);
 }
 
+#edit-title {
+  width: 100%;
+  margin: 10px 0 8px;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 10px;
+}
+
+#edit-body {
+  width: 100%;
+  min-height: 55vh;
+  resize: vertical;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px;
+}
+
 .dialog-hint {
   padding: 0 14px 12px;
   font-size: 11px;

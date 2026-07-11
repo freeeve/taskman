@@ -119,6 +119,51 @@ func (t Task) Renumber(num int) (Task, error) {
 	return nt, nil
 }
 
+// Retitle gives the task a new description: the H1 is rewritten to the
+// numbered form and the file renamed to the new slug, keeping number, lane,
+// status, and deferral. An existing file at the target is refused rather
+// than clobbered (os.Rename replaces silently).
+func (t Task) Retitle(desc string) (Task, error) {
+	if !t.HasNum {
+		return t, fmt.Errorf("%s has no number; adopt it before retitling", t.File)
+	}
+	slug := Slugify(desc)
+	if err := CheckSlug(slug); err != nil {
+		return t, err
+	}
+	if err := retitleH1(t.Path(), t.Num, desc); err != nil {
+		return t, err
+	}
+	nt := t
+	nt.Slug = slug
+	nt.File = nt.Name()
+	if nt.File == t.File {
+		return nt, nil
+	}
+	if _, err := os.Stat(nt.Path()); err == nil {
+		return t, fmt.Errorf("%s already exists; refusing to overwrite it", nt.File)
+	}
+	if err := os.Rename(t.Path(), nt.Path()); err != nil {
+		return t, err
+	}
+	return nt, nil
+}
+
+// retitleH1 replaces the file's H1 with the numbered title, inserting one
+// when the body lacks it.
+func retitleH1(path string, num int, desc string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	title := fmt.Sprintf("# %03d -- %s", num, desc)
+	first, rest, _ := strings.Cut(string(data), "\n")
+	if strings.HasPrefix(first, "# ") {
+		return os.WriteFile(path, []byte(title+"\n"+rest), 0o644)
+	}
+	return os.WriteFile(path, []byte(title+"\n\n"+string(data)), 0o644)
+}
+
 // Slugify folds a description to the ledger's kebab case: lowercase
 // alphanumeric runs joined by single dashes.
 func Slugify(desc string) string {

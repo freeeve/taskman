@@ -429,10 +429,57 @@ function render() {
 async function openTask(num) {
   const data = await api(`/api/projects/${state.project}/tasks/${num}`);
   state.dialogTask = num;
+  state.dialogData = data;
   $("#dialog-file").textContent = data.task.file;
   $("#dialog-body").innerHTML = data.html;
   renderActions(data.task);
   $("#task-dialog").showModal();
+}
+
+// renderEditor swaps the dialog into edit mode: title input + raw markdown
+// textarea, saved through PUT tasks/{n} (one scoped commit) and re-rendered
+// in place.
+function renderEditor(data) {
+  const body = $("#dialog-body");
+  body.replaceChildren();
+  const titleInput = document.createElement("input");
+  titleInput.id = "edit-title";
+  titleInput.value = data.task.title;
+  titleInput.title = "task title (changes the slug/filename)";
+  body.append(titleInput);
+  const ta = document.createElement("textarea");
+  ta.id = "edit-body";
+  ta.value = data.body;
+  body.append(ta);
+
+  const bar = $("#dialog-actions");
+  bar.replaceChildren();
+  const save = document.createElement("button");
+  save.textContent = "save";
+  save.addEventListener("click", async () => {
+    const payload = { body: ta.value };
+    const title = titleInput.value.trim();
+    if (title && title !== data.task.title) payload.title = title;
+    try {
+      await api(`/api/projects/${state.project}/tasks/${data.task.num}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+    } catch (err) {
+      alert(err.message || err);
+    }
+    await loadTasks().catch(showError);
+    await openTask(data.task.num).catch((err) => alert(err.message || err));
+  });
+  bar.append(save);
+  const cancel = document.createElement("button");
+  cancel.textContent = "cancel";
+  cancel.addEventListener("click", () =>
+    openTask(data.task.num).catch((err) => alert(err.message || err))
+  );
+  bar.append(cancel);
+  titleInput.focus();
 }
 
 // --- screenshots: paste or drop an image while the task dialog is open.
@@ -515,6 +562,11 @@ function renderActions(t) {
     });
     bar.append(b);
   };
+  const edit = document.createElement("button");
+  edit.textContent = "edit";
+  edit.addEventListener("click", () => renderEditor(state.dialogData));
+  bar.append(edit);
+
   const status = (s) => () => post(`/api/projects/${state.project}/tasks/${t.num}/status`, { status: s });
   if (t.deferred) {
     act("resume", () => post(`/api/projects/${state.project}/tasks/${t.num}/resume`));

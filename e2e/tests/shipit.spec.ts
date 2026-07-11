@@ -173,3 +173,32 @@ test("UI: ship it (confirmed) then unship round-trips the card state", async ({ 
 
   removeFeatureBySlug(slug);
 });
+
+test("UI: a stale ship-it that 409s still refreshes the card to the shipped state", async ({
+  page,
+}) => {
+  const desc = uniqueDesc("ship-conflict");
+  const slug = await createFeature(page, desc);
+  await gotoBoard(page);
+  await openFeaturesTab(page);
+  const cardSel = `.feature-card[data-slug="${slug}"]`;
+  await expect(page.locator(cardSel).locator("button", { hasText: "ship it" })).toBeVisible();
+
+  // Another client ships it out-of-band: the open tab's card is now stale.
+  expect((await page.request.post(`${base}/features/${slug}/done`)).status()).toBe(200);
+
+  // Click the stale "ship it": confirm() then a 409 "already done" alert. The
+  // fix (task 068) refreshes regardless, so the card self-corrects to shipped
+  // without a manual tab switch -- accept both dialogs.
+  page.on("dialog", (d) => d.accept());
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`${PROJECT}/features`) && r.request().method() === "GET"),
+    page.locator(cardSel).locator("button", { hasText: "ship it" }).click(),
+  ]);
+  await expect(page.locator(cardSel).locator(".badge", { hasText: "shipped" })).toBeVisible();
+  await expect(page.locator(cardSel).locator("button", { hasText: "unship" })).toBeVisible();
+  await expect(page.locator(cardSel).locator("button", { hasText: "ship it" })).toHaveCount(0);
+  await expect(page.locator(`${cardSel} .feature-slug`)).toHaveText(`${slug}.done.md`);
+
+  removeFeatureBySlug(slug);
+});

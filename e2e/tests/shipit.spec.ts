@@ -17,6 +17,26 @@ const base = `${BASE_URL}/api/projects/${PROJECT}`;
 
 test.skip(() => !storeIsLocal(), "store is not local to the test runner");
 
+/** The store's current HEAD commit hash. */
+function headCommit(): string {
+  return execFileSync("git", ["-C", STORE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+}
+
+/** Commits added to the store since `base`, subject + files touched (renames split). */
+function commitsSince(base: string): { subject: string; files: string[] }[] {
+  const hashes = execFileSync("git", ["-C", STORE, "rev-list", `${base}..HEAD`], { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+  return hashes.map((h) => ({
+    subject: execFileSync("git", ["-C", STORE, "log", "-1", "--format=%s", h], { encoding: "utf8" }).trim(),
+    files: execFileSync("git", ["-C", STORE, "show", "--name-only", "--no-renames", "--format=", h], {
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean),
+  }));
+}
+
 /** Create a feature via the API and return its slug. */
 async function createFeature(page: Page, description: string): Promise<string> {
   const res = await page.request.post(`${base}/features`, { data: { description } });
@@ -101,6 +121,32 @@ test("API: re-creating a slug that is already shipped is a clean 409, spec prese
   // The shipped spec is untouched and no active file was created.
   expect(fs.existsSync(active)).toBe(false);
   expect(fs.readFileSync(shipped, "utf8")).toBe(before);
+
+  removeFeatureBySlug(slug);
+});
+
+test("each feature lifecycle mutation lands as exactly one commit scoped to its files", async ({
+  page,
+}) => {
+  // taskman's audit-trail contract: every web mutation is one store commit,
+  // touching only that mutation's files. The suite is single-worker, so the
+  // commits added during this test are exactly create + ship + unship.
+  const before = headCommit();
+  const desc = uniqueDesc("commit-trail");
+  const slug = await createFeature(page, desc);
+  expect((await page.request.post(`${base}/features/${slug}/done`)).status()).toBe(200);
+  expect((await page.request.post(`${base}/features/${slug}/reopen`)).status()).toBe(200);
+
+  const commits = commitsSince(before);
+  expect(commits.length, `commits: ${commits.map((c) => c.subject).join(" | ")}`).toBe(3);
+  const ownFile = new RegExp(`^${PROJECT}/features/${slug}(\\.done)?\\.md$`);
+  for (const c of commits) {
+    expect(c.files.length, `empty commit "${c.subject}"`).toBeGreaterThan(0);
+    for (const f of c.files) {
+      expect(f, `stray file in commit "${c.subject}"`).toMatch(ownFile);
+    }
+    expect(c.subject, `not a scoped semantic message: "${c.subject}"`).toContain(`chore(${PROJECT}):`);
+  }
 
   removeFeatureBySlug(slug);
 });

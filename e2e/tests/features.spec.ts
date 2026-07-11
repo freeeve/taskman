@@ -13,9 +13,9 @@ import {
 
 /**
  * Features view tests: tab switching, feature creation and shipping, and
- * the duplicate-creation error. Features cannot be deleted through the API,
- * so every test creates a uniquely-named feature; shipped and leftover
- * features accumulate in the sandbox like done tasks do.
+ * the duplicate-creation error. Each test creates a uniquely-named feature;
+ * most rely on global teardown to prune the sandbox, though a feature can now
+ * be removed through the API (task 093) for tests that clean up inline.
  */
 
 const base = `${BASE_URL}/api/projects/${PROJECT}`;
@@ -432,4 +432,24 @@ test("the link picker is keyboard-operable: filter then Enter links the task (ta
   await expect(card.locator(".chip", { hasText: pad })).toContainText("pending");
 
   await finishTask(request, t.num);
+});
+
+test("a spec renders GFM tables and strikethrough", async ({ request }) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  // Roadmap specs phase work in tables and strike completed lines. These GFM
+  // extensions render from the AST (not raw HTML), so they must survive
+  // renderBody's no-WithUnsafe policy. (Task-list checkboxes are covered
+  // separately above.)
+  const created = await request.post(`${base}/features`, { data: { description: uniqueDesc("feature-gfm") } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  appendFeatureBody(slug, "\n| Phase | State |\n| --- | --- |\n| one | ~~done~~ |\n");
+
+  const feats = await (await request.get(`${base}/features`)).json();
+  const html: string = feats.find((f: { slug: string }) => f.slug === slug).html;
+  expect(html).toContain("<table>");
+  expect(html).toContain("<del>done</del>");
+
+  // 093 lets specs clean up after themselves instead of accumulating.
+  expect((await request.delete(`${base}/features/${slug}`)).status()).toBe(204);
 });

@@ -12,6 +12,7 @@ import {
   gotoBoard,
   headCommit,
   openCard,
+  setStatusViaAPI,
   taskByTitle,
   uniqueDesc,
 } from "../helpers";
@@ -177,6 +178,40 @@ test("the priority buttons stack vertically in a gutter without inflating the me
   expect(position).toBe("absolute");
 
   await finishTask(page.request, t.num);
+});
+
+test("show all done toggles the done column between the cap and every card (task 098)", async ({
+  page,
+  request,
+}) => {
+  // The done column caps at 15 most-recent cards; the toggle must expand to all
+  // and collapse back, in-UI, without a reload. Seed >15 done tasks so the cap
+  // engages regardless of what else is in the column.
+  test.setTimeout(60_000);
+  const DONE_CAP = 15;
+  for (let i = 0; i < DONE_CAP + 1; i++) {
+    const t = await createTaskViaAPI(request, uniqueDesc(`donecap-${i}`));
+    await setStatusViaAPI(request, t.num, "done");
+  }
+
+  await gotoBoard(page);
+  const doneCol = page.locator(".column[data-status=done]");
+  const cards = doneCol.locator(".card");
+  const toggle = doneCol.locator(".show-more");
+
+  // Capped: exactly DONE_CAP cards and an expand affordance.
+  await expect(cards).toHaveCount(DONE_CAP);
+  await expect(toggle).toHaveText("show all done");
+
+  // Expand: more than the cap, and the label flips to collapse.
+  await toggle.click();
+  await expect(toggle).toHaveText("show fewer");
+  expect(await cards.count()).toBeGreaterThan(DONE_CAP);
+
+  // Collapse: back to the cap, in-UI, no reload.
+  await toggle.click();
+  await expect(cards).toHaveCount(DONE_CAP);
+  await expect(toggle).toHaveText("show all done");
 });
 
 test("the board refetches on focus, surfacing an out-of-band task without a reload", async ({

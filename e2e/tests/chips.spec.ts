@@ -99,6 +99,36 @@ test("acting on a task from its chip updates the chip without a tab switch", asy
   await finishTask(page.request, t.num);
 });
 
+test("acting on a chip keeps that feature's open spec panel open", async ({ page }) => {
+  const t = await createTaskViaAPI(page.request, uniqueDesc("details-keep"));
+  const desc = uniqueDesc("details-keep-feat");
+  const slug = await createFeature(page, desc);
+  linkTasksToFeature(slug, [t.num]);
+
+  await gotoBoard(page);
+  const card = await openFeature(page, desc);
+  const pad = String(t.num).padStart(3, "0");
+
+  // Expand the spec, then act on the task from its chip.
+  await card.locator("details summary").click();
+  await expect(card.locator("details")).toHaveJSProperty("open", true);
+  await card.locator(".chip", { hasText: pad }).click();
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/api/projects/${PROJECT}/features`) && r.request().method() === "GET"
+    ),
+    page.locator("#dialog-actions button", { hasText: "start" }).click(),
+  ]);
+
+  // The refresh updated the chip but kept the spec panel open.
+  const after = page.locator(".feature-card", { hasText: desc });
+  await expect(after.locator(".chip", { hasText: pad })).toContainText("in-progress");
+  await expect(after.locator("details")).toHaveJSProperty("open", true);
+
+  await finishTask(page.request, t.num);
+});
+
 test("an interactive chip is a focusable button and Enter opens the task", async ({ page }) => {
   const t = await createTaskViaAPI(page.request, uniqueDesc("chip-a11y"));
   const desc = uniqueDesc("chip-a11y-feat");

@@ -80,6 +80,21 @@ func PruneOrder(projDir string, gone map[int]bool) (string, error) {
 	return WriteOrder(projDir, kept)
 }
 
+// PromoteToTop rewrites the order with num first (creating the file when
+// absent): an answered decision jumps the queue so the agent picks it up
+// next.
+func PromoteToTop(projDir string, num int) (string, error) {
+	order := ReadOrder(projDir)
+	kept := make([]int, 0, len(order)+1)
+	kept = append(kept, num)
+	for _, n := range order {
+		if n != num {
+			kept = append(kept, n)
+		}
+	}
+	return WriteOrder(projDir, kept)
+}
+
 // SortByOrder arranges tasks priority-first: tasks whose numbers appear in
 // order come first in that sequence; everything else keeps ledger order
 // (ascending number, asks last) after them. Unknown numbers in the order and

@@ -46,6 +46,8 @@ func run(args []string) error {
 		return cmdDefer(rest)
 	case "resume":
 		return cmdResume(rest)
+	case "decisions":
+		return cmdDecisions(rest)
 	case "lane":
 		return cmdLane(rest)
 	case "adopt":
@@ -93,7 +95,15 @@ Usage:
   taskman defer -reason <why> <n|slug>
                                hold on an external decision: hidden from list,
                                the reason recorded in the task body
+  taskman defer -question <q> -option "Label::why" -option ... <n|slug>
+                               hold on a structured question the web dialog
+                               (or resume -choose) can answer
   taskman resume <n|slug>      lift a deferral, restoring the prior status
+  taskman resume -choose <label> <n|slug>
+                               answer the task's decision and jump it to the
+                               top of the priority order (-choose-other for
+                               free text)
+  taskman decisions            tasks holding an unanswered decision
   taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
   taskman feature new <description>
                                create a feature spec in features/ (source of

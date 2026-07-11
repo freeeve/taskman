@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -121,22 +122,54 @@ func cmdStatus(args []string, s task.Status) error {
 	return nil
 }
 
+// optionFlags collects repeatable -option values ("Label::explanation").
+type optionFlags []string
+
+func (o *optionFlags) String() string { return strings.Join(*o, "; ") }
+func (o *optionFlags) Set(v string) error {
+	*o = append(*o, v)
+	return nil
+}
+
 // cmdDefer holds a task on an external decision and commits the rename. The
-// reason is mandatory: an unexplained deferral decays into an unexplained
-// pending task, and the filename cannot carry the why.
+// hold must carry its why: either a -reason, or a structured -question with
+// labelled -option choices that the web dialog (or resume -choose) can
+// answer -- an unexplained deferral decays into an unexplained pending task,
+// and the filename cannot carry the why.
 func cmdDefer(args []string) error {
 	fs := flag.NewFlagSet("defer", flag.ContinueOnError)
-	reason := fs.String("reason", "", "why the task is held (required)")
+	reason := fs.String("reason", "", "why the task is held")
+	question := fs.String("question", "", "structured question to pose (with -option choices)")
+	var options optionFlags
+	fs.Var(&options, "option", `answer choice as "Label::explanation" (repeatable, >=2)`)
+	noOther := fs.Bool("no-other", false, "disallow a free-text Other answer")
 	noCommit := fs.Bool("no-commit", false, "skip the git commit")
 	project := fs.String("p", "", "project name (default: resolved from the current directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: taskman defer -reason <why> [-p project] [-no-commit] <number|slug>")
+		return fmt.Errorf("usage: taskman defer (-reason <why> | -question <q> -option <a> -option <b>) [-p project] [-no-commit] <number|slug>")
 	}
-	if strings.TrimSpace(*reason) == "" {
-		return fmt.Errorf("taskman defer requires -reason: record why this is held, not just that it is")
+	why := strings.TrimSpace(*reason)
+	q := strings.TrimSpace(*question)
+	if why == "" && q == "" {
+		return fmt.Errorf("taskman defer requires -reason or -question: record why this is held, not just that it is")
+	}
+	var decision task.Decision
+	if q != "" {
+		decision = task.Decision{Question: q, AllowOther: !*noOther}
+		for _, raw := range options {
+			label, explain, _ := strings.Cut(raw, "::")
+			decision.Options = append(decision.Options,
+				task.DecisionOption{Label: strings.TrimSpace(label), Explain: strings.TrimSpace(explain)})
+		}
+		if len(decision.Options) < 2 {
+			return fmt.Errorf("a -question needs at least two -option choices")
+		}
+		if why == "" {
+			why = "decision needed: " + q
+		}
 	}
 	p, err := openProject(*project)
 	if err != nil {
@@ -146,27 +179,35 @@ func cmdDefer(args []string) error {
 	if err != nil {
 		return err
 	}
-	nt, err := t.Defer(strings.TrimSpace(*reason), time.Now().Format("2006-01-02"))
+	nt, err := t.Defer(why, time.Now().Format("2006-01-02"))
 	if err != nil {
 		return err
 	}
+	if q != "" {
+		if err := nt.PoseDecision(decision); err != nil {
+			return err
+		}
+	}
 	fmt.Printf("%s -> %s\n", t.File, nt.File)
-	p.commit(*noCommit, fmt.Sprintf("defer %s (%s)", nt.Stem(), strings.TrimSpace(*reason)),
-		t.Path(), nt.Path())
+	p.commit(*noCommit, fmt.Sprintf("defer %s (%s)", nt.Stem(), why), t.Path(), nt.Path())
 	return nil
 }
 
 // cmdResume lifts a deferral, returning the task to the working set at the
-// status it held, and commits the rename.
+// status it held, and commits the rename. A task holding an unanswered
+// decision must be answered (-choose / -choose-other), never silently
+// dropped; an answered decision jumps to the top of the priority order.
 func cmdResume(args []string) error {
 	fs := flag.NewFlagSet("resume", flag.ContinueOnError)
+	choose := fs.String("choose", "", "answer the task's decision with this option label")
+	chooseOther := fs.String("choose-other", "", "answer the task's decision with free text")
 	noCommit := fs.Bool("no-commit", false, "skip the git commit")
 	project := fs.String("p", "", "project name (default: resolved from the current directory)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: taskman resume [-p project] [-no-commit] <number|slug>")
+		return fmt.Errorf("usage: taskman resume [-choose <label> | -choose-other <text>] [-p project] [-no-commit] <number|slug>")
 	}
 	p, err := openProject(*project)
 	if err != nil {
@@ -175,13 +216,57 @@ func cmdResume(args []string) error {
 	t, err := task.Find(p.Tasks, fs.Arg(0))
 	if err != nil {
 		return err
+	}
+	body, err := os.ReadFile(t.Path())
+	if err != nil {
+		return err
+	}
+	decision, live := task.ParseDecision(string(body))
+	chosen, note := strings.TrimSpace(*choose), strings.TrimSpace(*chooseOther)
+	if !live && (chosen != "" || note != "") {
+		return fmt.Errorf("%s has no unanswered decision", t.File)
+	}
+	if live {
+		switch {
+		case chosen != "":
+			okLabel := false
+			for _, opt := range decision.Options {
+				if opt.Label == chosen {
+					okLabel = true
+					break
+				}
+			}
+			if !okLabel {
+				return fmt.Errorf("%q is not one of the options; pick a label or use -choose-other", chosen)
+			}
+		case note != "":
+			if !decision.AllowOther {
+				return fmt.Errorf("this decision does not allow a free-text answer; pick a label with -choose")
+			}
+			chosen = "Other"
+		default:
+			return fmt.Errorf("this task has an unanswered decision; answer it with -choose <label> or -choose-other <text>")
+		}
+		if err := t.AnswerDecision(chosen, note, time.Now().Format("2006-01-02")); err != nil {
+			return err
+		}
 	}
 	nt, err := t.Resume(time.Now().Format("2006-01-02"))
 	if err != nil {
 		return err
 	}
+	paths := []string{t.Path(), nt.Path()}
+	msg := fmt.Sprintf("resume %s", nt.Stem())
+	if live {
+		op, err := store.PromoteToTop(filepath.Dir(p.Dir), nt.Num)
+		if err != nil {
+			return err
+		}
+		paths = append(paths, op)
+		msg = fmt.Sprintf("answer decision on %s (%s)", nt.Stem(), chosen)
+	}
 	fmt.Printf("%s -> %s\n", t.File, nt.File)
-	p.commit(*noCommit, fmt.Sprintf("resume %s", nt.Stem()), t.Path(), nt.Path())
+	p.commit(*noCommit, msg, paths...)
 	return nil
 }
 

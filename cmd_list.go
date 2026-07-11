@@ -146,6 +146,42 @@ func cmdNext(args []string) error {
 	return nil
 }
 
+// cmdDecisions lists tasks holding an unanswered decision -- the human's
+// answer queue.
+func cmdDecisions(args []string) error {
+	fs := flag.NewFlagSet("decisions", flag.ContinueOnError)
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	p, err := openProject(*project)
+	if err != nil {
+		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
+	shown := 0
+	for _, t := range p.Tasks {
+		if !t.Deferred {
+			continue
+		}
+		body, err := os.ReadFile(t.Path())
+		if err != nil {
+			continue
+		}
+		if d, live := task.ParseDecision(string(body)); live {
+			shown++
+			fmt.Fprintf(w, "%03d\t%s\t%s\n", t.Num, t.Slug, d.Question)
+		}
+	}
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if shown == 0 {
+		fmt.Printf("no unanswered decisions in project %s\n", p.Name)
+	}
+	return nil
+}
+
 // cmdProjects lists the store's projects with open and deferred counts.
 func cmdProjects(args []string) error {
 	fs := flag.NewFlagSet("projects", flag.ContinueOnError)

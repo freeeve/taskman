@@ -360,6 +360,83 @@ func TestFeatures(t *testing.T) {
 	}
 }
 
+// TestDecisionFlow drives the interactive-decision CLI end to end: pose via
+// defer -question, bare resume refuses, resume -choose answers, records, and
+// jumps the task to the top of the order; reason-only defer is unchanged.
+func TestDecisionFlow(t *testing.T) {
+	home, dir := storeLedger(t, "decproj", "001_first.md", "002_fork-choice.md", "003_third.md")
+	if err := os.WriteFile(filepath.Join(home, "decproj", "order"),
+		[]byte("001\n002\n003\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := run([]string{"defer", "-question", "Inline or queue?",
+		"-option", "Inline::simpler", "-option", "Queue::durable", "2"}); err != nil {
+		t.Fatalf("defer -question: %v", err)
+	}
+	body, err := os.ReadFile(filepath.Join(dir, "002_fork-choice.deferred.md"))
+	if err != nil {
+		t.Fatalf("deferred file: %v", err)
+	}
+	if !strings.Contains(string(body), "question: Inline or queue?") ||
+		!strings.Contains(string(body), "- label: Queue") ||
+		!strings.Contains(string(body), "explain: durable") {
+		t.Errorf("decision block:\n%s", body)
+	}
+
+	out := capture(t, func() { _ = run([]string{"decisions"}) })
+	if !strings.Contains(out, "Inline or queue?") {
+		t.Errorf("decisions listing:\n%s", out)
+	}
+
+	// One option is not a question; bare resume refuses; bogus label refuses.
+	if err := run([]string{"defer", "-question", "q", "-option", "only", "3"}); err == nil {
+		t.Error("single-option question must error")
+	}
+	if err := run([]string{"resume", "2"}); err == nil ||
+		!strings.Contains(err.Error(), "unanswered decision") {
+		t.Errorf("bare resume = %v", err)
+	}
+	if err := run([]string{"resume", "-choose", "Nope", "2"}); err == nil {
+		t.Error("unknown label must error")
+	}
+
+	if err := run([]string{"resume", "-choose", "Queue", "2"}); err != nil {
+		t.Fatalf("resume -choose: %v", err)
+	}
+	body, err = os.ReadFile(filepath.Join(dir, "002_fork-choice.md"))
+	if err != nil {
+		t.Fatalf("resumed file: %v", err)
+	}
+	if !strings.Contains(string(body), "chosen: Queue") ||
+		!strings.Contains(string(body), "```decision answered") {
+		t.Errorf("answered record:\n%s", body)
+	}
+	order, _ := os.ReadFile(filepath.Join(home, "decproj", "order"))
+	if !strings.HasPrefix(strings.TrimPrefix(string(order), "# priority order, top = next up; rewritten by taskman\n"), "002\n") {
+		t.Errorf("answered decision must jump the queue:\n%s", order)
+	}
+	if log := git(t, home, "log", "-1", "--format=%s"); !strings.Contains(log, "answer decision on 002_fork-choice (Queue)") {
+		t.Errorf("answer commit = %q", log)
+	}
+
+	// choose on a task without a live decision refuses; reason-only defer
+	// still works and writes no block.
+	if err := run([]string{"resume", "-choose", "Queue", "2"}); err == nil {
+		t.Error("choose without a live decision must error")
+	}
+	if err := run([]string{"defer", "-reason", "plain hold", "1"}); err != nil {
+		t.Fatalf("reason-only defer: %v", err)
+	}
+	body, _ = os.ReadFile(filepath.Join(dir, "001_first.deferred.md"))
+	if strings.Contains(string(body), "```decision") {
+		t.Errorf("reason-only defer must not write a block:\n%s", body)
+	}
+	if err := run([]string{"resume", "1"}); err != nil {
+		t.Fatalf("plain resume: %v", err)
+	}
+}
+
 // TestServeArgs pins the serve command's guard rails without binding.
 func TestServeArgs(t *testing.T) {
 	storeLedger(t, "serveproj")

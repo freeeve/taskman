@@ -22,7 +22,21 @@ import {
  */
 
 const NARROW = [480, 390, 320];
-const HEADER_CONTROLS = ["#project-button", "#lane", "#new-task", "#tab-tasks", "#tab-features"];
+// Every interactive header control must stay on-screen when the bar wraps --
+// including the ones added after this test first landed (activity tab, global
+// search box, undo), so a future addition that overflows is caught.
+const HEADER_CONTROLS = [
+  "#project-button",
+  "#lane",
+  "#new-task",
+  "#tab-tasks",
+  "#tab-features",
+  "#tab-activity",
+  "#search",
+  "#undo",
+  "#show-deferred",
+  "#swimlanes",
+];
 
 /** Document-level horizontal overflow: content wider than the viewport. */
 async function hasHorizontalOverflow(page: Page): Promise<boolean> {

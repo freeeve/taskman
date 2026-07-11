@@ -207,6 +207,13 @@ main#board {
 
 .card.deferred { opacity: 0.65; }
 
+.card .priority-controls {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .card .to-top, .card .to-bottom {
   padding: 0 6px;
   font-size: 12px;
@@ -216,8 +223,6 @@ main#board {
   color: var(--text-dim);
   border-radius: 6px;
 }
-
-.card .to-top { margin-left: auto; }
 
 .card .to-top:hover, .card .to-top:focus-visible,
 .card .to-bottom:hover, .card .to-bottom:focus-visible {

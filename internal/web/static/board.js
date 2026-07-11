@@ -365,6 +365,9 @@ function card(t) {
     meta.append(def);
   }
   if (t.status === "pending" && !t.deferred) {
+    // Stacked vertically -- up above, down below -- to match their meaning.
+    const controls = document.createElement("div");
+    controls.className = "priority-controls";
     const top = document.createElement("button");
     top.type = "button";
     top.className = "to-top";
@@ -375,7 +378,7 @@ function card(t) {
       e.stopPropagation();
       pushToTop(t.num);
     });
-    meta.append(top);
+    controls.append(top);
     const bottom = document.createElement("button");
     bottom.type = "button";
     bottom.className = "to-bottom";
@@ -386,7 +389,8 @@ function card(t) {
       e.stopPropagation();
       pushToBottom(t.num);
     });
-    meta.append(bottom);
+    controls.append(bottom);
+    meta.append(controls);
   }
   el.append(meta);
 

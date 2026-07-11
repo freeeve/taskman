@@ -261,3 +261,32 @@ test("a spec's raw HTML is neutralized, not rendered live (no script/onerror inj
   expect(html).not.toMatch(/onerror=/i);
   expect(html).not.toMatch(/href="javascript:/i);
 });
+
+test("a spec's GFM task list renders read-only checkboxes", async ({ page, request }) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // Checklists are a common way to author a feature spec. goldmark's GFM task
+  // list must render disabled checkboxes: the board never persists spec edits,
+  // so a clickable checkbox would toggle to a no-op and mislead. Verify both
+  // the checked/unchecked state and that every box is disabled.
+  const desc = uniqueDesc("feature-tasklist");
+  const created = await request.post(`${base}/features`, { data: { description: desc } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  appendFeatureBody(slug, `\n## Checklist\n\n- [x] shipped thing\n- [ ] pending thing\n`);
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const card = page.locator(".feature-card", { hasText: desc });
+  await card.locator("details summary").click();
+
+  const boxes = card.locator(".md input[type=checkbox]");
+  await expect(boxes).toHaveCount(2);
+  await expect(boxes.nth(0)).toBeChecked();
+  await expect(boxes.nth(1)).not.toBeChecked();
+  await expect(boxes.nth(0)).toBeDisabled();
+  await expect(boxes.nth(1)).toBeDisabled();
+});

@@ -1,4 +1,5 @@
 import { expect, type APIRequestContext, type Page } from "@playwright/test";
+import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -32,19 +33,36 @@ export function storeIsLocal(): boolean {
 }
 
 /**
+ * Commit a feature file into the store so a direct-to-disk edit does not
+ * leave the shared working tree dirty. The API commits its own mutations;
+ * these fs helpers edit the "Tasks:" line / body that the API does not
+ * expose, so they must tidy up after themselves.
+ */
+function commitFeatureFile(slug: string): void {
+  const rel = `${PROJECT}/features/${slug}.md`;
+  execFileSync("git", ["-C", STORE, "add", "--", rel]);
+  execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): e2e edit ${slug}`, "--", rel]);
+}
+
+/**
  * Set a feature's linked task numbers by rewriting its "Tasks:" line on
- * disk. Only valid when storeIsLocal(). Callers reload the features view
- * (or the page) to see the new chips.
+ * disk, then commit so the store tree stays clean. Only valid when
+ * storeIsLocal(). Callers reload the features view to see the new chips.
  */
 export function linkTasksToFeature(slug: string, nums: number[]): void {
   const file = path.join(FEATURES_DIR, `${slug}.md`);
   const body = fs.readFileSync(file, "utf8");
   fs.writeFileSync(file, body.replace(/^Tasks:.*$/m, `Tasks: ${nums.join(", ")}`));
+  commitFeatureFile(slug);
 }
 
-/** Append markdown to a feature's body on disk. Only valid when storeIsLocal(). */
+/**
+ * Append markdown to a feature's body on disk, then commit so the store
+ * tree stays clean. Only valid when storeIsLocal().
+ */
 export function appendFeatureBody(slug: string, markdown: string): void {
   fs.appendFileSync(path.join(FEATURES_DIR, `${slug}.md`), markdown);
+  commitFeatureFile(slug);
 }
 
 /** Title prefix of the baseline fixture tasks created by global setup. */

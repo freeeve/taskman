@@ -32,6 +32,31 @@ export function storeIsLocal(): boolean {
   return fs.existsSync(path.join(STORE, PROJECT));
 }
 
+/** Current store HEAD commit hash; a baseline for commitsSince(). */
+export function headCommit(): string {
+  return execFileSync("git", ["-C", STORE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
+}
+
+/**
+ * Commits made to the store since `base`, newest first, each with its subject
+ * and the files it touched. The store is multi-writer (other projects commit
+ * concurrently), so callers filter by the files they care about rather than
+ * assuming a raw count.
+ */
+export function commitsSince(base: string): { subject: string; files: string[] }[] {
+  const hashes = execFileSync("git", ["-C", STORE, "rev-list", `${base}..HEAD`], { encoding: "utf8" })
+    .split("\n")
+    .filter(Boolean);
+  return hashes.map((h) => ({
+    subject: execFileSync("git", ["-C", STORE, "log", "-1", "--format=%s", h], { encoding: "utf8" }).trim(),
+    files: execFileSync("git", ["-C", STORE, "show", "--name-only", "--no-renames", "--format=", h], {
+      encoding: "utf8",
+    })
+      .split("\n")
+      .filter(Boolean),
+  }));
+}
+
 /**
  * Commit a feature file into the store so a direct-to-disk edit does not
  * leave the shared working tree dirty. The API commits its own mutations;

@@ -2,7 +2,17 @@ import { test, expect, type Page } from "@playwright/test";
 import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { BASE_URL, FEATURES_DIR, PROJECT, STORE, gotoBoard, storeIsLocal, uniqueDesc } from "../helpers";
+import {
+  BASE_URL,
+  FEATURES_DIR,
+  PROJECT,
+  STORE,
+  commitsSince,
+  gotoBoard,
+  headCommit,
+  storeIsLocal,
+  uniqueDesc,
+} from "../helpers";
 
 /**
  * Ship / unship lifecycle for features (task 049). Shipping is now confirmed
@@ -16,26 +26,6 @@ import { BASE_URL, FEATURES_DIR, PROJECT, STORE, gotoBoard, storeIsLocal, unique
 const base = `${BASE_URL}/api/projects/${PROJECT}`;
 
 test.skip(() => !storeIsLocal(), "store is not local to the test runner");
-
-/** The store's current HEAD commit hash. */
-function headCommit(): string {
-  return execFileSync("git", ["-C", STORE, "rev-parse", "HEAD"], { encoding: "utf8" }).trim();
-}
-
-/** Commits added to the store since `base`, subject + files touched (renames split). */
-function commitsSince(base: string): { subject: string; files: string[] }[] {
-  const hashes = execFileSync("git", ["-C", STORE, "rev-list", `${base}..HEAD`], { encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
-  return hashes.map((h) => ({
-    subject: execFileSync("git", ["-C", STORE, "log", "-1", "--format=%s", h], { encoding: "utf8" }).trim(),
-    files: execFileSync("git", ["-C", STORE, "show", "--name-only", "--no-renames", "--format=", h], {
-      encoding: "utf8",
-    })
-      .split("\n")
-      .filter(Boolean),
-  }));
-}
 
 /** Create a feature via the API and return its slug. */
 async function createFeature(page: Page, description: string): Promise<string> {

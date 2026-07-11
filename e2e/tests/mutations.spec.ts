@@ -1,12 +1,16 @@
 import { test, expect } from "@playwright/test";
 import {
+  PROJECT,
   card,
+  commitsSince,
+  createTaskViaAPI,
   createTaskViaUI,
   dialogAction,
   dragCardOnto,
   finishTask,
   getTasks,
   gotoBoard,
+  headCommit,
   openCard,
   taskByTitle,
   uniqueDesc,
@@ -57,6 +61,67 @@ test("dragging a pending card onto another reorders priority", async ({ page }) 
 
   await finishTask(page.request, first.num);
   await finishTask(page.request, second.num);
+});
+
+test("the to-top button pushes a pending task to the head of priority in one reorder commit", async ({
+  page,
+}) => {
+  // Two pending tasks so the target starts below the head; new tasks append to
+  // the bottom of the pending column.
+  const a = await createTaskViaUI(page, uniqueDesc("totop-a"));
+  const b = await createTaskViaUI(page, uniqueDesc("totop-b"));
+  const target = b.num;
+
+  const headNum = () =>
+    page.locator(".column.pending .card").first().getAttribute("data-num");
+  expect(await headNum()).not.toBe(String(target));
+
+  const before = headCommit();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/${PROJECT}/order`) && r.request().method() === "PUT"
+    ),
+    page.locator(`.column.pending .card[data-num="${target}"] .to-top`).click(),
+  ]);
+
+  // The target now leads the pending column and stays there across a reload.
+  await expect(page.locator(".column.pending .card").first()).toHaveAttribute(
+    "data-num",
+    String(target)
+  );
+  await page.reload();
+  await expect(page.locator(".column.pending .card").first()).toHaveAttribute(
+    "data-num",
+    String(target)
+  );
+
+  // Exactly one commit touched this project's order file: the reorder (the
+  // store is multi-writer, so filter to the order file rather than count raw).
+  const orderCommits = commitsSince(before).filter((c) => c.files.includes(`${PROJECT}/order`));
+  expect(orderCommits).toHaveLength(1);
+  expect(orderCommits[0].subject).toContain("reorder tasks");
+
+  await finishTask(page.request, a.num);
+  await finishTask(page.request, b.num);
+});
+
+test("the board refetches on focus, surfacing an out-of-band task without a reload", async ({
+  page,
+}) => {
+  // Create a task through the API (a separate client). The open board is a
+  // snapshot -- the store is multi-writer (CLI, other sessions) -- so it does
+  // not yet show the new task.
+  const t = await createTaskViaAPI(page.request, uniqueDesc("focus-refresh"));
+  await expect(page.locator(`.card[data-num="${t.num}"]`)).toHaveCount(0);
+
+  // Regaining window focus triggers a refetch; the card appears with no reload.
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/tasks`)),
+    page.evaluate(() => window.dispatchEvent(new Event("focus"))),
+  ]);
+  await expect(page.locator(`.column.pending .card[data-num="${t.num}"]`)).toBeVisible();
+
+  await finishTask(page.request, t.num);
 });
 
 test("dialog actions walk a task through start, done, and reopen", async ({ page }) => {

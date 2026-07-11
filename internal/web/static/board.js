@@ -696,6 +696,5 @@ wire();
 wirePicker();
 wireScreenshots();
 wireRefresh();
-loadProjects()
-  .then(loadTasks)
-  .catch(showError);
+// router.js awaits this before applying any deep link.
+const bootReady = loadProjects().then(loadTasks).catch(showError);

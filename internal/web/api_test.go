@@ -1061,7 +1061,8 @@ func TestUndo(t *testing.T) {
 
 func TestStaticAndIndex(t *testing.T) {
 	_, srv := testStore(t)
-	for _, path := range []string{"/", "/static/app.css", "/static/board.js", "/static/features.js"} {
+	for _, path := range []string{"/", "/static/app.css", "/static/board.js",
+		"/static/features.js", "/static/activity.js", "/static/router.js"} {
 		res, err := http.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)

@@ -28,6 +28,7 @@ function chip(c) {
   const interactive = c.status !== "missing";
   const el = document.createElement(interactive ? "button" : "span");
   el.className = "chip " + c.status.replace("/", "-");
+  el.dataset.num = c.num;
   el.textContent = `${String(c.num).padStart(3, "0")} ${c.status}`;
   if (interactive) {
     el.type = "button";

@@ -437,6 +437,22 @@ function wireScreenshots() {
   });
 }
 
+// focusTask returns keyboard focus to the given task's element in the
+// active view after a re-render destroyed the dialog's invoker; the card or
+// chip may be gone (hidden, capped, filtered), so the tab button is the
+// landmark fallback.
+function focusTask(num) {
+  const onFeatures = typeof featuresVisible !== "undefined" && featuresVisible;
+  const el = document.querySelector(
+    (onFeatures ? "#features" : "#board") + ` [data-num="${num}"]`
+  );
+  if (el) {
+    el.focus();
+    return;
+  }
+  $(onFeatures ? "#tab-features" : "#tab-tasks").focus();
+}
+
 // renderActions offers the lifecycle moves valid for the task's state; every
 // one goes through the same API (and commits) as a drag or a CLI call.
 function renderActions(t) {
@@ -447,7 +463,7 @@ function renderActions(t) {
     b.textContent = label;
     b.addEventListener("click", () => {
       $("#task-dialog").close();
-      mutate(fn);
+      mutate(fn).then(() => focusTask(t.num));
     });
     bar.append(b);
   };

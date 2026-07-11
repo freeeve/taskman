@@ -162,6 +162,10 @@ function wirePicker() {
   });
   document.addEventListener("keydown", (e) => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      // With the modal task dialog open the page behind is inert, so the
+      // picker would open unusable behind the backdrop and stay stuck open
+      // after the dialog closes.
+      if ($("#task-dialog").open) return;
       e.preventDefault();
       openPicker();
     }

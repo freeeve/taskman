@@ -130,6 +130,7 @@ main#board {
   padding: 8px 10px;
   margin: 6px 0;
   cursor: pointer;
+  overflow-wrap: anywhere;
 }
 
 .card:hover { border-color: var(--accent); }
@@ -236,6 +237,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
 }
 .md code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; }
 .md img { max-width: 100%; border-radius: 6px; }
+.md { overflow-wrap: anywhere; }
 .md table { border-collapse: collapse; }
 .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; }
 .md a { color: var(--accent); }
@@ -326,8 +328,22 @@ main#features {
   gap: 8px;
 }
 
-.feature-head h3 { margin: 0; font-size: 15px; }
-.feature-slug { font-size: 11px; color: var(--text-dim); margin: 2px 0 8px; }
+/* min-width:0 lets the flex title shrink below its min-content (an
+   unbreakable word otherwise refuses to wrap and shoves the ship/unship
+   button off-screen); overflow-wrap then breaks the word itself. */
+.feature-head h3 {
+  margin: 0;
+  font-size: 15px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.feature-slug {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin: 2px 0 8px;
+  overflow-wrap: anywhere;
+}
 
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 

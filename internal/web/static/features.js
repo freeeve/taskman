@@ -36,9 +36,10 @@ function chip(c) {
   return el;
 }
 
-function featureCard(f) {
+function featureCard(f, specOpen) {
   const el = document.createElement("article");
   el.className = "feature-card" + (f.done ? " done" : "");
+  el.dataset.slug = f.slug;
 
   const head = document.createElement("div");
   head.className = "feature-head";
@@ -75,6 +76,7 @@ function featureCard(f) {
   }
 
   const details = document.createElement("details");
+  details.open = Boolean(specOpen);
   const summary = document.createElement("summary");
   summary.textContent = "spec";
   details.append(summary);
@@ -89,6 +91,14 @@ function featureCard(f) {
 
 function renderFeatures(feats) {
   const view = $("#features");
+  // The rebuild would discard reading position: remember which spec panels
+  // are open (and the scroll offset) and restore them after.
+  const openSlugs = new Set(
+    [...view.querySelectorAll(".feature-card details[open]")].map(
+      (d) => d.closest(".feature-card").dataset.slug
+    )
+  );
+  const scrollY = window.scrollY;
   view.replaceChildren();
 
   const bar = document.createElement("div");
@@ -107,13 +117,14 @@ function renderFeatures(feats) {
 
   const active = feats.filter((f) => !f.done);
   const done = feats.filter((f) => f.done);
-  for (const f of [...active, ...done]) view.append(featureCard(f));
+  for (const f of [...active, ...done]) view.append(featureCard(f, openSlugs.has(f.slug)));
   if (!feats.length) {
     const empty = document.createElement("div");
     empty.className = "empty";
     empty.textContent = "no features yet";
     view.append(empty);
   }
+  window.scrollTo(0, scrollY);
 }
 
 $("#tab-tasks").addEventListener("click", () => switchTab(false));

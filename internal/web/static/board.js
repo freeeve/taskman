@@ -631,8 +631,24 @@ function wire() {
     render();
   });
   $("#dialog-close").addEventListener("click", () => $("#task-dialog").close());
+  wireLightDismiss();
   $("#new-task").addEventListener("click", newTask);
   $("#undo").addEventListener("click", undoLast);
+}
+
+// wireLightDismiss closes the dialog on a backdrop click: content lives in
+// child elements, so only backdrop clicks target the dialog itself. The
+// mousedown must start on the backdrop too, or selecting text in the edit
+// textarea and releasing outside would discard the edit mid-drag.
+function wireLightDismiss() {
+  const dialog = $("#task-dialog");
+  let downOnBackdrop = false;
+  dialog.addEventListener("mousedown", (e) => {
+    downOnBackdrop = e.target === dialog;
+  });
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog && downOnBackdrop) dialog.close();
+  });
 }
 
 // --- external-change freshness: the store is multi-writer (CLI and other

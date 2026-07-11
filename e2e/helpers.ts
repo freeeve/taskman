@@ -104,6 +104,33 @@ export function appendTaskBody(file: string, markdown: string): void {
 }
 
 /**
+ * Write a raw task file directly into the store and commit it. Used to seed a
+ * state the API refuses to create -- notably a second file sharing an existing
+ * number, to exercise the board's duplicate-number resilience. The normal
+ * allocation lock prevents dupes, so they can only be forged on disk. Returns
+ * the file name. Only valid when storeIsLocal().
+ */
+export function writeRawTaskFile(fileName: string, body: string): string {
+  const rel = `${PROJECT}/tasks/${fileName}`;
+  fs.writeFileSync(path.join(STORE, PROJECT, "tasks", fileName), body);
+  execFileSync("git", ["-C", STORE, "add", "--", rel]);
+  execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): e2e seed ${fileName}`, "--", rel]);
+  return fileName;
+}
+
+/** Delete a store task file and commit the removal. Only valid when storeIsLocal(). */
+export function removeRawTaskFile(fileName: string): void {
+  const rel = `${PROJECT}/tasks/${fileName}`;
+  fs.rmSync(path.join(STORE, PROJECT, "tasks", fileName), { force: true });
+  execFileSync("git", ["-C", STORE, "add", "-A", "--", rel]);
+  try {
+    execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): e2e remove ${fileName}`, "--", rel]);
+  } catch {
+    // Nothing to commit (already gone) -- fine.
+  }
+}
+
+/**
  * Path to a taskman binary able to pose structured decisions. A decision is
  * posed only through the CLI (`defer -question -option ...`); the web API
  * defers with a reason only. Prefer $TASKMAN_BIN, else the repo's freshly

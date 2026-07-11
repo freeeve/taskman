@@ -21,12 +21,17 @@ async function loadFeatures() {
   renderFeatures(feats);
 }
 
+// chip renders a linked task's status. Interactive chips are real buttons so
+// keyboard users can reach them and Enter/Space opens the dialog; "missing"
+// chips stay inert spans.
 function chip(c) {
-  const el = document.createElement("span");
+  const interactive = c.status !== "missing";
+  const el = document.createElement(interactive ? "button" : "span");
   el.className = "chip " + c.status.replace("/", "-");
   el.textContent = `${String(c.num).padStart(3, "0")} ${c.status}`;
-  if (c.status !== "missing") {
-    el.addEventListener("click", () => openTask(c.num));
+  if (interactive) {
+    el.type = "button";
+    el.addEventListener("click", () => openTask(c.num).catch((err) => alert(err.message || err)));
   }
   return el;
 }

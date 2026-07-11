@@ -333,6 +333,7 @@ main#features {
 .chip {
   font-size: 11px;
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: none;
   border: 1px solid var(--border);
   border-radius: 10px;
   padding: 1px 8px;

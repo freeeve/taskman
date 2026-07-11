@@ -94,12 +94,16 @@ $("#project").addEventListener("change", () => writeHash());
 for (const id of ["#tab-tasks", "#tab-features", "#tab-activity"]) {
   $(id).addEventListener("click", () => writeHash());
 }
-// Spec panel toggles: non-bubbling, so capture. Last toggle wins the hash.
+// Spec panel toggles: non-bubbling, so capture. Only genuine user toggles
+// win the hash -- rebuild-fired toggles (renderFeatures recreating open
+// panels) are suppressed via renderingFeatures, or they feedback-loop with
+// applyHash's re-render (task 086).
 document.addEventListener(
   "toggle",
   (e) => {
     const card = e.target.closest ? e.target.closest(".feature-card") : null;
     if (!card || applyingHash) return;
+    if (typeof renderingFeatures !== "undefined" && renderingFeatures) return;
     if (e.target.open) {
       writeHash(`#/p/${state.project}/feature/${card.dataset.slug}`);
     } else if (location.hash.endsWith(`/feature/${card.dataset.slug}`)) {

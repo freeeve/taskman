@@ -219,7 +219,15 @@ function featureCard(f, specOpen) {
   return el;
 }
 
+// renderingFeatures suppresses the router's toggle listener during rebuilds:
+// recreating an open <details> fires a toggle, and with 2+ open panels those
+// rebuild toggles would rewrite the hash, whose hashchange re-renders --
+// a ping-pong loop (task 086). Toggle events are queued as tasks, so the
+// flag clears on a queued task too, after every rebuild toggle has fired.
+let renderingFeatures = false;
+
 function renderFeatures(feats) {
+  renderingFeatures = true;
   const view = $("#features");
   // The rebuild would discard reading position: remember which spec panels
   // are open (and the scroll offset) and restore them after.
@@ -262,6 +270,9 @@ function renderFeatures(feats) {
     view.append(empty);
   }
   window.scrollTo(0, scrollY);
+  setTimeout(() => {
+    renderingFeatures = false;
+  }, 0);
 }
 
 $("#tab-tasks").addEventListener("click", () => switchTab(false));

@@ -8,7 +8,6 @@ import {
   PROJECT,
   STORE,
   createTaskViaAPI,
-  finishTask,
   storeIsLocal,
   uniqueDesc,
 } from "../helpers";
@@ -91,8 +90,13 @@ test("concurrent same-task status changes never leak the store path and leave on
     targets.map((status) => request.post(`${base}/tasks/${t.num}/status`, { data: { status } }))
   );
   for (const res of responses) {
+    // Mutations are fully serialized, so a lost race is a clean 409 -- never
+    // a 500 (task 041) -- and the winners are 200.
+    expect([200, 409], `unexpected status ${res.status()}`).toContain(res.status());
     const body = await res.json().catch(() => ({}));
     if (body.error) {
+      // And the os.LinkError message never carries the absolute store path
+      // (task 039).
       expect(body.error, `leaked path: ${body.error}`).not.toMatch(/\/Users\/|\.taskman\//);
     }
   }
@@ -106,5 +110,8 @@ test("concurrent same-task status changes never leak the store path and leave on
     .filter((f) => f.startsWith(`${pad}_`) || f.startsWith(`${pad}-`));
   expect(files, `task files after race: ${files.join(", ")}`).toHaveLength(1);
 
-  await finishTask(request, t.num);
+  // The race leaves the task in a nondeterministic status (a "done" may have
+  // won), so mark it done best-effort -- a 409 "already done" is fine here
+  // and must not fail the cleanup.
+  await request.post(`${base}/tasks/${t.num}/status`, { data: { status: "done" } });
 });

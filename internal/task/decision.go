@@ -125,7 +125,7 @@ func (t Task) PoseDecision(d Decision) error {
 		return err
 	}
 	if _, live := ParseDecision(string(data)); live {
-		return fmt.Errorf("%s already has an unanswered decision", t.File)
+		return fmt.Errorf("%s already has an unanswered decision", t.Ref())
 	}
 	out := strings.TrimRight(string(data), "\n") + "\n\n" + formatDecision(d) + "\n"
 	return os.WriteFile(t.Path(), []byte(out), 0o644)

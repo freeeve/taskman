@@ -98,6 +98,17 @@ func (t Task) Name() string {
 	return name + ".md"
 }
 
+// Ref renders the task's human reference for error messages: the number for
+// adopted tasks, the stem for legacy prefixed asks. Errors carry this rather
+// than the on-disk basename, which is an internal detail that would leak
+// through the web API to HTTP clients.
+func (t Task) Ref() string {
+	if t.HasNum {
+		return fmt.Sprintf("task %03d", t.Num)
+	}
+	return t.Prefix + "_" + t.Slug
+}
+
 // StatusLabel renders the task's state for display, folding the orthogonal
 // deferral flag into the status column.
 func (t Task) StatusLabel() string {

@@ -1392,6 +1392,45 @@ func TestEditTask(t *testing.T) {
 	}
 }
 
+// TestMutationErrorsHideFilenames pins the error surface of redundant
+// mutations: already-done, already-deferred, and already-has-lane 409s must
+// carry a clean task reference, never the internal .md basename or a store
+// path (task 124, extending the 117 norm).
+func TestMutationErrorsHideFilenames(t *testing.T) {
+	_, srv := testStore(t)
+	var e struct {
+		Error string `json:"error"`
+	}
+	clean := func(when string, code, want int) {
+		t.Helper()
+		if code != want {
+			t.Errorf("%s: status %d, want %d (err %q)", when, code, want, e.Error)
+		}
+		if strings.Contains(e.Error, ".md") || strings.Contains(e.Error, "/") {
+			t.Errorf("%s leaks internals: %q", when, e.Error)
+		}
+	}
+	code := send(t, srv, "POST", "/api/projects/myproj/tasks/1/status",
+		map[string]string{"status": "done"}, &e)
+	clean("already done", code, 409)
+	if !strings.Contains(e.Error, "task 001 is already done") {
+		t.Errorf("already-done ref = %q", e.Error)
+	}
+	code = send(t, srv, "POST", "/api/projects/myproj/tasks/4/defer",
+		map[string]string{"reason": "again"}, &e)
+	clean("already deferred", code, 409)
+	code = send(t, srv, "POST", "/api/projects/myproj/tasks/3/lane",
+		map[string]string{"lane": "impl"}, &e)
+	clean("same lane", code, 409)
+	// The duplicate-slug refusals reference the colliding task cleanly too.
+	code = send(t, srv, "POST", "/api/projects/myproj/tasks",
+		map[string]string{"description": "Build Board"}, &e)
+	clean("duplicate slug", code, 409)
+	if !strings.Contains(e.Error, "task 002") {
+		t.Errorf("duplicate-slug ref = %q", e.Error)
+	}
+}
+
 // TestEditConflict pins optimistic concurrency for body edits: a save
 // carrying the etag it loaded must still match on the server or it 409s
 // instead of silently clobbering a concurrent editor's save, for both task

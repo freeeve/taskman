@@ -13,7 +13,7 @@ import (
 // decision" mark no longer holds.
 func (t Task) SetStatus(s Status) (Task, error) {
 	if t.Status == s && !t.Deferred {
-		return t, fmt.Errorf("%s is already %s", t.File, s)
+		return t, fmt.Errorf("%s is already %s", t.Ref(), s)
 	}
 	nt := t
 	nt.Status, nt.Deferred = s, false
@@ -29,7 +29,7 @@ func (t Task) SetStatus(s Status) (Task, error) {
 // refused rather than silently reopened.
 func (t Task) Defer(reason, date string) (Task, error) {
 	if t.Deferred {
-		return t, fmt.Errorf("%s is already deferred", t.File)
+		return t, fmt.Errorf("%s is already deferred", t.Ref())
 	}
 	if t.Status == Done {
 		return t, fmt.Errorf("%s is done; reopen it before deferring", t.File)
@@ -71,7 +71,7 @@ func (t Task) SetLane(lane string) (Task, error) {
 		return t, fmt.Errorf("%s has no number; adopt it before assigning a lane", t.File)
 	}
 	if t.Lane == lane {
-		return t, fmt.Errorf("%s already has lane %q", t.File, lane)
+		return t, fmt.Errorf("%s already has lane %q", t.Ref(), lane)
 	}
 	if err := CheckLane(lane); err != nil {
 		return t, err
@@ -153,7 +153,7 @@ func (t Task) Retitle(desc string) (Task, error) {
 		if other.HasNum && other.Num == t.Num {
 			continue
 		}
-		return t, fmt.Errorf("slug %q is already used by %s", slug, other.File)
+		return t, fmt.Errorf("slug %q is already used by %s", slug, other.Ref())
 	}
 	if err := retitleH1(t.Path(), t.Num, desc); err != nil {
 		return t, err
@@ -310,7 +310,7 @@ func New(dir string, tasks []Task, desc, lane, date string) (Task, error) {
 	}
 	for _, other := range tasks {
 		if other.Slug == slug {
-			return Task{}, fmt.Errorf("slug %q is already used by %s; pick a distinct description", slug, other.File)
+			return Task{}, fmt.Errorf("slug %q is already used by %s; pick a distinct description", slug, other.Ref())
 		}
 	}
 	t := Task{Dir: dir, Num: NextNum(tasks), HasNum: true, Slug: slug, Lane: lane}

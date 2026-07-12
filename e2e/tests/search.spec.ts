@@ -162,6 +162,52 @@ test("clicking a feature search result deep-links to and opens that spec panel",
   await expect(page.locator(`.feature-card[data-slug="${slug}"] details[open]`)).toHaveCount(1);
 });
 
+test("a cross-project search result switches project and opens the item on click", async ({
+  page,
+  request,
+}) => {
+  // Cross-project search's payoff: a hit in another project deep-links there.
+  // Start on a DIFFERENT project and jump to a sandbox task -- the click must
+  // switch state.project (the picker's value) and open the dialog, not merely
+  // change the hash. Needs a second project in the store to start from.
+  const projects = await (await request.get(`${BASE_URL}/api/projects`)).json();
+  const names: string[] = (projects.projects ?? projects ?? []).map(
+    (p: { name?: string } | string) => (typeof p === "string" ? p : p.name)
+  );
+  const other = names.find((n) => n && n !== PROJECT);
+  test.skip(!other, "needs a second project in the store to start from");
+
+  const tok = token("xproj");
+  const t = await createTaskViaAPI(request, `xproj ${tok}`);
+  // The index tracks HEAD but can trail a commit briefly under concurrent
+  // writers; confirm searchability on the wire before driving the UI.
+  await expect
+    .poll(async () =>
+      ((await (await request.get(`${BASE_URL}/api/search?q=${tok}`)).json()) as { num: number }[]).some(
+        (h) => h.num === t.num
+      )
+    )
+    .toBe(true);
+
+  // Start on the other project (a read-only view), then search and click.
+  await page.goto(`/#/p/${other}`);
+  await expect(page.locator("#project")).toHaveValue(other!);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/search")),
+    page.locator("#search").fill(tok),
+  ]);
+  await page.locator("#search-results .search-row", { hasText: tok }).click();
+
+  // The click crosses projects: the picker value, the hash, and the open dialog
+  // all land on the sandbox task.
+  await expect(page).toHaveURL(new RegExp(`#/p/${PROJECT}/task/${t.num}$`));
+  await expect(page.locator("#project")).toHaveValue(PROJECT);
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect(page.locator("#task-dialog")).toContainText(tok);
+
+  await finishTask(request, t.num);
+});
+
 /**
  * Truncation affordance (task 114): the box shows at most 30 hits and, when a
  * query matches more, appends a dim "refine your search" footer so results are

@@ -294,3 +294,30 @@ test("defer requires a reason, hides the card, and resume restores it", async ({
 
   await finishTask(page.request, t.num);
 });
+
+test("resume restores a deferred task's underlying status rather than forcing pending (orthogonal marker)", async ({
+  request,
+}) => {
+  const base = `${BASE_URL}/api/projects/${PROJECT}`;
+  const find = async (num: number) =>
+    (await getTasks(request)).tasks.find((x: { num: number }) => x.num === num);
+
+  const t = await createTaskViaAPI(request, uniqueDesc("defer-inprogress"));
+  await setStatusViaAPI(request, t.num, "in-progress");
+
+  // Defer is orthogonal: it flags the task without changing its status.
+  expect((await request.post(`${base}/tasks/${t.num}/defer`, {
+    data: { reason: "held on an external decision" },
+  })).status()).toBe(200);
+  const deferred = await find(t.num);
+  expect(deferred.status, "defer keeps the underlying status").toBe("in-progress");
+  expect(deferred.deferred).toBe(true);
+
+  // Resume clears the marker and leaves it in-progress -- not demoted to pending.
+  expect((await request.post(`${base}/tasks/${t.num}/resume`, { data: {} })).status()).toBe(200);
+  const resumed = await find(t.num);
+  expect(resumed.status, "resume preserves the pre-defer status").toBe("in-progress");
+  expect(resumed.deferred).toBe(false);
+
+  await finishTask(request, t.num);
+});

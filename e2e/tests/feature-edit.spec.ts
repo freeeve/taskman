@@ -130,3 +130,50 @@ test("the feature edit API rejects an empty body and an unknown slug", async ({ 
 
   await request.delete(`${base}/features/${slug}`);
 });
+
+test("saving a feature body after it changed out-of-band 409s and keeps the editor open with typed text (task 115)", async ({
+  page,
+  request,
+}) => {
+  // Feature bodies carry the same optimistic-concurrency contract as task
+  // bodies: the editor loads an etag base and a stale save 409s instead of
+  // clobbering a concurrent edit, keeping the user's unsaved text. The task
+  // side is covered in task-edit.spec; this is its feature sibling.
+  const slug = await makeFeature(request, "fedit-oob");
+
+  await gotoBoard(page);
+  await page.locator("#tab-features").click();
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await expect(card).toBeVisible();
+  await card.locator("button", { hasText: "edit" }).click();
+
+  const marker = `feat-unsaved-${Date.now()}`;
+  await page.locator("#edit-body").fill(`# heading\n\nTasks:\n\n${marker}\n`);
+
+  // Another session rewrites the body out-of-band, so the editor's loaded base
+  // (its etag) is now stale.
+  const oob = await request.put(`${base}/features/${slug}`, {
+    data: { body: "# changed elsewhere\n\nTasks:\n" },
+  });
+  expect(oob.status()).toBe(200);
+
+  // The save 409s; the client alerts and stays in the editor rather than
+  // discarding the typed text. Await the dialog directly so the message is
+  // captured before asserting.
+  const [resp, dialog] = await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/features/${slug}`) && r.request().method() === "PUT"
+    ),
+    page.waitForEvent("dialog"),
+    page.locator("#dialog-actions button", { hasText: "save" }).click(),
+  ]);
+  expect(resp.status()).toBe(409);
+  expect(dialog.message()).toMatch(/changed since you loaded/i);
+  await dialog.accept();
+
+  // The editor is still open and still holds the unsaved marker.
+  await expect(page.locator("#edit-body")).toBeVisible();
+  await expect(page.locator("#edit-body")).toHaveValue(new RegExp(marker));
+
+  await request.delete(`${base}/features/${slug}`);
+});

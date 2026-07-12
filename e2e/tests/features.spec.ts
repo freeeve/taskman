@@ -372,6 +372,55 @@ test("the link picker links then unlinks a task, updating its chip and the rollu
   await finishTask(request, t.num);
 });
 
+test("the link picker can link an already-done task, not just pending ones", async ({
+  page,
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // A feature map documents completed work too, so the picker lists tasks of
+  // every status -- it filters only on the typed query, never on status. Link
+  // a task that is already done and the chip and rollup reflect it: a status
+  // filter creeping into the picker (or the tasks API dropping done tasks)
+  // would silently make finished work unlinkable.
+  const t = await createTaskViaAPI(request, uniqueDesc("linkdone-task"));
+  expect(
+    (await request.post(`${base}/tasks/${t.num}/status`, { data: { status: "done" } })).ok()
+  ).toBeTruthy();
+  const created = await request.post(`${base}/features`, { data: { description: uniqueDesc("linkdone-feat") } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+  const pad = String(t.num).padStart(3, "0");
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await expect(card).toBeVisible();
+
+  await card.locator("button.link-btn").click();
+  const panel = card.locator(".link-panel");
+  await expect(panel).toBeVisible();
+  await panel.locator("input").fill(pad);
+  // The done task is offered in the picker.
+  await expect(panel.locator("li", { hasText: pad }).first()).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().includes(`/features/${slug}/tasks`) && r.request().method() === "PUT"
+    ),
+    panel.locator("li", { hasText: pad }).first().click(),
+  ]);
+
+  // The chip carries the done status and the rollup counts it as complete.
+  await expect(card.locator(".chip", { hasText: pad })).toContainText("done");
+  await expect(card.locator(".rollup")).toContainText("1/1 tasks done");
+
+  // The task is already done (global teardown prunes it); finishTask would
+  // re-mark a done task and fail, so there is nothing to clean up here.
+});
+
 test("the + task button on a feature creates a task already linked to it", async ({
   page,
   request,

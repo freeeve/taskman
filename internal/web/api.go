@@ -345,7 +345,10 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	rendered, err := renderBody(body, r.PathValue("p"))
+	// Decision blocks are storage format: the live one renders as the
+	// interactive widget instead, answered ones as readable summaries. The
+	// raw body field stays exact for agents and the editor.
+	rendered, err := renderBody([]byte(task.PresentDecisions(string(body))), r.PathValue("p"))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

@@ -97,6 +97,32 @@ func TestPoseDecisionValidation(t *testing.T) {
 	}
 }
 
+// TestPresentDecisions pins the reader view: live blocks vanish (the widget
+// owns them), answered blocks summarize as blockquotes, and unrelated fences
+// pass through untouched.
+func TestPresentDecisions(t *testing.T) {
+	body := "# 005 -- Title\n\nProse.\n\n```go\nfmt.Println(\"keep me\")\n```\n\n" +
+		"```decision\nquestion: Live?\noptions:\n- label: a\n- label: b\n```\n\n" +
+		"```decision answered 2026-07-11\nquestion: Old?\nchosen: b\nnote: because\n```\n"
+	got := PresentDecisions(body)
+	if strings.Contains(got, "```decision") {
+		t.Errorf("decision fences must not survive:\n%s", got)
+	}
+	if strings.Contains(got, "question: Live?") {
+		t.Errorf("live block content must be dropped:\n%s", got)
+	}
+	if !strings.Contains(got, "> **Decision** (2026-07-11): Old?") ||
+		!strings.Contains(got, "> **Chosen:** b -- because") {
+		t.Errorf("answered summary missing:\n%s", got)
+	}
+	if !strings.Contains(got, "```go") || !strings.Contains(got, "keep me") {
+		t.Errorf("non-decision fence must pass through:\n%s", got)
+	}
+	if !strings.Contains(got, "Prose.") {
+		t.Errorf("body prose must survive:\n%s", got)
+	}
+}
+
 // FuzzParseDecision pins leniency: arbitrary bodies never panic, and any
 // parsed decision honors the invariants (question, >=2 labelled options).
 func FuzzParseDecision(f *testing.F) {

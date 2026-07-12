@@ -979,6 +979,20 @@ func TestDecisionAPI(t *testing.T) {
 		len(detail.Decision.Options) != 2 || detail.Decision.Options[1].Explain != "durable" {
 		t.Fatalf("decision payload = %+v", detail.Decision)
 	}
+	// The raw block must not double-render as a code block below the widget.
+	var detailHTML struct {
+		HTML string `json:"html"`
+		Body string `json:"body"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/4", &detailHTML); code != 200 {
+		t.Fatal("detail failed")
+	}
+	if strings.Contains(detailHTML.HTML, "language-decision") {
+		t.Errorf("decision fence leaked into rendered html: %q", detailHTML.HTML)
+	}
+	if !strings.Contains(detailHTML.Body, "```decision") {
+		t.Errorf("raw body must keep the exact block for agents:\n%s", detailHTML.Body)
+	}
 
 	// Plain resume refuses while the decision is live.
 	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/resume", nil, nil); code != 409 {
@@ -1010,6 +1024,17 @@ func TestDecisionAPI(t *testing.T) {
 	if !strings.Contains(string(after), "chosen: Queue") ||
 		!strings.Contains(string(after), "```decision answered") {
 		t.Errorf("answered record:\n%s", after)
+	}
+	// The answered history renders as a summary, not a raw code block.
+	var answeredHTML struct {
+		HTML string `json:"html"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/4", &answeredHTML); code != 200 {
+		t.Fatal("post-answer detail failed")
+	}
+	if strings.Contains(answeredHTML.HTML, "language-decision") ||
+		!strings.Contains(answeredHTML.HTML, "Chosen:") {
+		t.Errorf("answered block not summarized: %q", answeredHTML.HTML)
 	}
 	order, _ := os.ReadFile(filepath.Join(home, "myproj", "order"))
 	if !strings.Contains(string(order), "004\n002") {

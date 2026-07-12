@@ -131,6 +131,56 @@ func (t Task) PoseDecision(d Decision) error {
 	return os.WriteFile(t.Path(), []byte(out), 0o644)
 }
 
+// PresentDecisions rewrites decision blocks for reading: the live block is
+// dropped (an interactive surface presents it), and answered blocks become
+// short blockquote summaries instead of raw serialization. The stored body
+// is untouched -- this shapes the rendered view only. Non-decision fences
+// pass through unchanged.
+func PresentDecisions(body string) string {
+	lines := strings.Split(body, "\n")
+	out := make([]string, 0, len(lines))
+	for i := 0; i < len(lines); i++ {
+		trimmed := strings.TrimSpace(lines[i])
+		live := trimmed == decisionFence
+		answered := strings.HasPrefix(trimmed, decisionAnsweredFence)
+		if !live && !answered {
+			out = append(out, lines[i])
+			continue
+		}
+		j := i + 1
+		for j < len(lines) && strings.TrimSpace(lines[j]) != "```" {
+			j++
+		}
+		if j >= len(lines) {
+			out = append(out, lines[i])
+			continue
+		}
+		if answered {
+			date := strings.TrimSpace(strings.TrimPrefix(trimmed, decisionAnsweredFence))
+			q, chosen, note := "", "", ""
+			for _, raw := range lines[i+1 : j] {
+				l := strings.TrimSpace(raw)
+				switch {
+				case strings.HasPrefix(l, "question:"):
+					q = strings.TrimSpace(strings.TrimPrefix(l, "question:"))
+				case strings.HasPrefix(l, "chosen:"):
+					chosen = strings.TrimSpace(strings.TrimPrefix(l, "chosen:"))
+				case strings.HasPrefix(l, "note:"):
+					note = strings.TrimSpace(strings.TrimPrefix(l, "note:"))
+				}
+			}
+			summary := fmt.Sprintf("> **Decision** (%s): %s", date, q)
+			choice := "> **Chosen:** " + chosen
+			if note != "" {
+				choice += " -- " + note
+			}
+			out = append(out, summary, choice)
+		}
+		i = j
+	}
+	return strings.Join(out, "\n")
+}
+
 // AnswerDecision rewrites the live block into an answered record carrying
 // the choice (and note, for Other or commentary), so history and the
 // resuming agent both see it. Choice validation belongs to the caller, which

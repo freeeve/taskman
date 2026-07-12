@@ -95,6 +95,72 @@ test("an edit with neither title nor body is a clean 400", async ({ request }) =
   await finishTask(request, t.num);
 });
 
+test("a task body save carrying a stale base is refused with 409, keeping the first editor's content (task 115)", async ({
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("edit-conflict"));
+  const loaded = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(loaded.etag, "detail exposes an etag token for optimistic concurrency").toBeTruthy();
+
+  // Editor A saves against the base it loaded -> 200.
+  const a = await request.put(`${base}/tasks/${t.num}`, {
+    data: { body: `${loaded.body}\n\nEDITOR-A\n`, base: loaded.etag },
+  });
+  expect(a.status()).toBe(200);
+
+  // Editor B saves against the SAME, now-stale base -> 409 and writes nothing.
+  const b = await request.put(`${base}/tasks/${t.num}`, {
+    data: { body: `${loaded.body}\n\nEDITOR-B\n`, base: loaded.etag },
+  });
+  expect(b.status()).toBe(409);
+
+  const after = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(after.body, "editor A's content survives; the stale write was rejected").toContain("EDITOR-A");
+  expect(after.body).not.toContain("EDITOR-B");
+
+  // A base-less save still succeeds -- older clients keep last-write-wins.
+  const legacy = await request.put(`${base}/tasks/${t.num}`, { data: { body: "# baseless\n" } });
+  expect(legacy.status()).toBe(200);
+
+  await finishTask(request, t.num);
+});
+
+test("saving an edit after the task changed out-of-band 409s and keeps the editor open with typed text (task 115)", async ({
+  page,
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("edit-oob"));
+  await gotoBoard(page);
+  await openCard(page, t.num);
+  await page.locator("#dialog-actions button", { hasText: "edit" }).click();
+
+  const marker = `my-unsaved-${Date.now()}`;
+  await page.locator("#edit-body").fill(`# heading\n\n${marker}\n`);
+
+  // Another session rewrites the body out-of-band, so the open editor's base
+  // (the etag it loaded) is now stale.
+  const oob = await request.put(`${base}/tasks/${t.num}`, { data: { body: "# changed elsewhere\n" } });
+  expect(oob.status()).toBe(200);
+
+  // The save 409s; the client alerts and stays in the editor rather than
+  // discarding the user's unsaved text. Await the dialog event directly so the
+  // message is captured before asserting (a late-firing handler races the check).
+  const [resp, dialog] = await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/tasks/${t.num}`) && r.request().method() === "PUT"),
+    page.waitForEvent("dialog"),
+    page.locator("#dialog-actions button", { hasText: "save" }).click(),
+  ]);
+  expect(resp.status()).toBe(409);
+  expect(dialog.message()).toMatch(/changed since you loaded/i);
+  await dialog.accept();
+
+  // The editor is still open and still holds the typed marker.
+  await expect(page.locator("#edit-body")).toBeVisible();
+  await expect(page.locator("#edit-body")).toHaveValue(new RegExp(marker));
+
+  await finishTask(request, t.num);
+});
+
 test("retitling a task to another task's title is refused, keeping both slugs unambiguous (task 108)", async ({
   request,
 }) => {

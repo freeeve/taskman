@@ -562,11 +562,13 @@ function renderEditor(data) {
   body.replaceChildren();
   const titleInput = document.createElement("input");
   titleInput.id = "edit-title";
+  titleInput.defaultValue = data.task.title;
   titleInput.value = data.task.title;
   titleInput.title = "task title (changes the slug/filename)";
   body.append(titleInput);
   const ta = document.createElement("textarea");
   ta.id = "edit-body";
+  ta.defaultValue = data.body;
   ta.value = data.body;
   body.append(ta);
 
@@ -762,7 +764,9 @@ function wire() {
     state.swimlanes = e.target.checked;
     render();
   });
-  $("#dialog-close").addEventListener("click", () => $("#task-dialog").close());
+  $("#dialog-close").addEventListener("click", () => {
+    if (confirmDiscard()) $("#task-dialog").close();
+  });
   wireLightDismiss();
   $("#new-task").addEventListener("click", newTask);
   $("#undo").addEventListener("click", undoLast);
@@ -773,10 +777,29 @@ function wire() {
   });
 }
 
+// dialogDirty reports whether an open editor holds unsaved changes: the
+// editor fields carry their loaded text as defaultValue, so view mode (no
+// editor fields) is never dirty and keeps its free light dismiss.
+function dialogDirty() {
+  for (const id of ["edit-body", "edit-title"]) {
+    const el = document.getElementById(id);
+    if (el && el.value !== el.defaultValue) return true;
+  }
+  return false;
+}
+
+// confirmDiscard gates the accidental close paths; save and the explicit
+// cancel button close without asking.
+function confirmDiscard() {
+  return !dialogDirty() || confirm("Discard unsaved changes?");
+}
+
 // wireLightDismiss closes the dialog on a backdrop click: content lives in
 // child elements, so only backdrop clicks target the dialog itself. The
 // mousedown must start on the backdrop too, or selecting text in the edit
-// textarea and releasing outside would discard the edit mid-drag.
+// textarea and releasing outside would discard the edit mid-drag. Unsaved
+// edits prompt before any of the three close paths (backdrop, X, Escape)
+// discards them.
 function wireLightDismiss() {
   const dialog = $("#task-dialog");
   let downOnBackdrop = false;
@@ -784,7 +807,10 @@ function wireLightDismiss() {
     downOnBackdrop = e.target === dialog;
   });
   dialog.addEventListener("click", (e) => {
-    if (e.target === dialog && downOnBackdrop) dialog.close();
+    if (e.target === dialog && downOnBackdrop && confirmDiscard()) dialog.close();
+  });
+  dialog.addEventListener("cancel", (e) => {
+    if (!confirmDiscard()) e.preventDefault();
   });
 }
 

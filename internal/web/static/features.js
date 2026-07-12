@@ -300,6 +300,7 @@ async function editFeatureSpec(f) {
   body.replaceChildren();
   const ta = document.createElement("textarea");
   ta.id = "edit-body";
+  ta.defaultValue = detail.body;
   ta.value = detail.body;
   body.append(ta);
 

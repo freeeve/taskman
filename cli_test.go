@@ -514,6 +514,35 @@ func TestDecisionSurfacing(t *testing.T) {
 	}
 }
 
+// TestRmProject pins the safe project-removal command: open tasks refuse
+// without -force, removal is one scoped commit, and unknown or already
+// removed projects error cleanly (task 122).
+func TestRmProject(t *testing.T) {
+	home, _ := storeLedger(t, "rmme", "001_open-item.md")
+	if err := run([]string{"rmproject", "rmme"}); err == nil ||
+		!strings.Contains(err.Error(), "-force") {
+		t.Errorf("open tasks must refuse removal: %v", err)
+	}
+	if err := run([]string{"done", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"rmproject", "rmme"}); err != nil {
+		t.Fatalf("removal of a settled project: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "rmme")); !os.IsNotExist(err) {
+		t.Error("project directory must be gone")
+	}
+	if s := git(t, home, "log", "-1", "--format=%s"); !strings.Contains(s, "chore(rmme): remove project") {
+		t.Errorf("removal commit = %q", s)
+	}
+	if err := run([]string{"rmproject", "rmme"}); err == nil {
+		t.Error("removing a removed project must error")
+	}
+	if err := run([]string{"rmproject", "-force", "nope"}); err == nil {
+		t.Error("unknown project must error")
+	}
+}
+
 // TestVersion pins the skew diagnostic: version always prints something and
 // never errors, whatever build info is present.
 func TestVersion(t *testing.T) {

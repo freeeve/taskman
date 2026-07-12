@@ -63,6 +63,8 @@ func run(args []string) error {
 		return cmdFix(rest)
 	case "projects":
 		return cmdProjects(rest)
+	case "rmproject":
+		return cmdRmProject(rest)
 	case "migrate":
 		return cmdMigrate(rest)
 	case "version", "-version", "--version":
@@ -156,6 +158,9 @@ Usage:
                                its next number, committed immediately; the
                                target is a bare project name (libcat), never
                                a path
+  taskman rmproject [-force] <project>
+                               remove a project from the store as one scoped
+                               commit; refuses open tasks without -force
   taskman fix [-n]             renumber duplicate numbers into the lowest free
                                slots (gaps first) and report unfillable gaps
   taskman version              build revision of this binary (diagnose

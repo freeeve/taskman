@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -145,6 +146,55 @@ func cmdFile(args []string) error {
 	}
 	fmt.Println(path)
 	p.commit(*noCommit, fmt.Sprintf("file %03d %s (cross-project ask from %s)", num, slug, filer), path)
+	return nil
+}
+
+// cmdRmProject removes a whole project from the store as one pathspec-scoped
+// commit -- the safe replacement for hand-run git in the shared repo, where a
+// bare commit sweeps other sessions' staged work. Projects with open or
+// deferred tasks are refused without -force.
+func cmdRmProject(args []string) error {
+	fs := flag.NewFlagSet("rmproject", flag.ContinueOnError)
+	force := fs.Bool("force", false, "remove even with open or deferred tasks")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: taskman rmproject [-force] <project>")
+	}
+	home, err := store.Ensure()
+	if err != nil {
+		return err
+	}
+	if err := store.AcquireProcessLock(home); err != nil {
+		return err
+	}
+	names, err := store.Projects(home)
+	if err != nil {
+		return err
+	}
+	if !slices.Contains(names, fs.Arg(0)) {
+		return fmt.Errorf("no project %q in the store", fs.Arg(0))
+	}
+	name := fs.Arg(0)
+	tasks, err := task.Load(filepath.Join(home, name, "tasks"))
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	open := 0
+	for _, t := range tasks {
+		if t.Status != task.Done {
+			open++
+		}
+	}
+	if open > 0 && !*force {
+		return fmt.Errorf("project %s has %d open or deferred tasks; pass -force to remove anyway", name, open)
+	}
+	msg := fmt.Sprintf("chore(%s): remove project", name)
+	if err := store.RemoveProject(home, name, msg); err != nil {
+		return err
+	}
+	fmt.Println("committed:", msg)
 	return nil
 }
 

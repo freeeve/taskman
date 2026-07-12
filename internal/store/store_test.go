@@ -309,6 +309,74 @@ func TestCommitCleanPathspecIsSuccess(t *testing.T) {
 	}
 }
 
+// TestRemoveProject pins the removal contract for the multi-writer store: a
+// project's removal is one pathspec-scoped commit that never sweeps another
+// session's concurrently staged, uncommitted work (task 122).
+func TestRemoveProject(t *testing.T) {
+	home := testHome(t)
+	if _, err := Ensure(); err != nil {
+		t.Fatal(err)
+	}
+	// Project A: tracked task plus an untracked leftover (never committed).
+	adir := filepath.Join(home, "doomed", "tasks")
+	if err := os.MkdirAll(adir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aTask := filepath.Join(adir, "001_x.done.md")
+	if err := os.WriteFile(aTask, []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(home, "chore(doomed): open 001_x", []string{aTask}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(home, "doomed", "order"), []byte("001\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Project B: a committed task with a staged-but-uncommitted edit -- the
+	// exact state another session is in between its add and commit.
+	bdir := filepath.Join(home, "bystander", "tasks")
+	if err := os.MkdirAll(bdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bTask := filepath.Join(bdir, "001_theirs.md")
+	if err := os.WriteFile(bTask, []byte("# theirs\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := Commit(home, "chore(bystander): open 001_theirs", []string{bTask}); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(bTask, []byte("# theirs\n\nconcurrent body edit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitOut(t, home, "add", "--", bTask)
+
+	if err := RemoveProject(home, "doomed", "chore(doomed): remove project"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(home, "doomed")); !os.IsNotExist(err) {
+		t.Error("project directory must be gone (including untracked leftovers)")
+	}
+	if s := gitOut(t, home, "log", "-1", "--format=%s"); s != "chore(doomed): remove project" {
+		t.Errorf("removal commit = %q", s)
+	}
+	// The removal commit touches ONLY the removed project.
+	if files := gitOut(t, home, "show", "--name-only", "--format=", "HEAD"); strings.Contains(files, "bystander") {
+		t.Errorf("removal commit swept a bystander:\n%s", files)
+	}
+	// The bystander's staged edit is still staged, uncommitted, and intact.
+	if status := gitOut(t, home, "status", "--porcelain", "--", "bystander"); !strings.Contains(status, "M ") {
+		t.Errorf("bystander's staged edit must survive:\n%s", status)
+	}
+	body, err := os.ReadFile(bTask)
+	if err != nil || !strings.Contains(string(body), "concurrent body edit") {
+		t.Errorf("bystander's file content: %v\n%s", err, body)
+	}
+	// Unknown project is a clean error.
+	if err := RemoveProject(home, "doomed", "chore(doomed): again"); err == nil {
+		t.Error("removing a removed project must error")
+	}
+}
+
 // TestCommitRetriesIndexLock pins the shared-store contract: a transient
 // index.lock held by another process delays a commit instead of failing it.
 func TestCommitRetriesIndexLock(t *testing.T) {

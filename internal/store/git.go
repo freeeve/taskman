@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -81,6 +82,37 @@ func Commit(dir, msg string, paths []string) error {
 		// so both are success, not failure.
 		if strings.Contains(err.Error(), "nothing to commit") ||
 			strings.Contains(err.Error(), "nothing added to commit") ||
+			strings.Contains(err.Error(), "did not match any file") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// RemoveProject deletes a project's directory from the store as one
+// pathspec-scoped removal commit. The pathspec matters: the store is
+// multi-writer, and a bare commit here would sweep another session's
+// concurrently staged work into a mislabeled removal.
+func RemoveProject(home, name, msg string) error {
+	commitMu.Lock()
+	defer commitMu.Unlock()
+	dir := filepath.Join(home, name)
+	if _, err := os.Stat(dir); err != nil {
+		return fmt.Errorf("no project %q", name)
+	}
+	rm := []string{"-C", home, "rm", "-r", "-q", "--ignore-unmatch", "--", name + "/"}
+	if err := gitRetry("rm", rm); err != nil {
+		return err
+	}
+	// Untracked leftovers (an order file never committed, stray temp files)
+	// survive git rm; the directory must go regardless.
+	if err := os.RemoveAll(dir); err != nil {
+		return err
+	}
+	commit := []string{"-C", home, "commit", "-q", "-m", msg, "--", name + "/"}
+	if err := gitRetry("commit", commit); err != nil {
+		if strings.Contains(err.Error(), "nothing to commit") ||
 			strings.Contains(err.Error(), "did not match any file") {
 			return nil
 		}

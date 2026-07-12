@@ -1,15 +1,19 @@
+/* Light values are tuned for WCAG AA as TEXT over the column background
+   (#eceef1, the strictest surface): every status/dim color here measures
+   >= 4.5:1 there, and >= 5.4:1 as a badge background under --bg text. */
 :root {
   --bg: #f4f5f7;
   --surface: #ffffff;
   --surface-2: #eceef1;
   --text: #1c2128;
-  --text-dim: #6a737d;
+  --text-dim: #575f68;
   --border: #d7dbe0;
-  --accent: #3b6ea5;
-  --pending: #b58a2e;
-  --in-progress: #3b6ea5;
-  --done: #3f7d4e;
-  --deferred: #8a6d9e;
+  --accent: #2f5a88;
+  --pending: #7d5f1a;
+  --in-progress: #2f5a88;
+  --done: #2f6440;
+  --deferred: #6f5482;
+  --danger: #9c4038;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
 }
 
@@ -26,6 +30,7 @@
     --in-progress: #6ca0d8;
     --done: #6fb381;
     --deferred: #a98cc0;
+    --danger: #d07a72;
     --shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
   }
 }
@@ -159,7 +164,7 @@ main#board {
 .badge.lane { background: var(--accent); }
 .badge.deferred { background: var(--deferred); }
 .badge.decision { background: var(--pending); }
-.badge.duplicate { background: #b0524a; }
+.badge.duplicate { background: var(--danger); }
 
 .decisions-pill {
   color: var(--bg);

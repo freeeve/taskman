@@ -142,3 +142,28 @@ test("the view tabs form an ARIA tablist with aria-selected and arrow-key naviga
   await page.keyboard.press("ArrowLeft");
   await expect(page.locator("#tab-features")).toHaveAttribute("aria-selected", "true");
 });
+
+test("arrow-key tab roving wraps at both ends and keeps the view and hash in sync (task 111)", async ({
+  page,
+}) => {
+  // The middle of the strip is exercised above; the modulo boundary is the
+  // untested edge. Wrapping onto the decisions tab also routes through a
+  // distinct activation path (the cross-project inbox), so the wrap must land
+  // the right panel and hash, not just move aria-selected.
+  await page.locator("#tab-tasks").focus();
+
+  // ArrowLeft from the first tab wraps to the last (decisions), which shows the
+  // cross-project inbox at #/decisions.
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator("#tab-decisions")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#decisions")).toBeVisible();
+  await expect(page.locator('[role="tabpanel"]:not([hidden])')).toHaveCount(1);
+  await expect(page).toHaveURL(/#\/decisions$/);
+
+  // ArrowRight from the last tab wraps back to the first (tasks/board).
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#tab-tasks")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#board")).toBeVisible();
+  await expect(page.locator('[role="tabpanel"]:not([hidden])')).toHaveCount(1);
+  await expect(page).toHaveURL(/#\/p\/[^/]+$/);
+});

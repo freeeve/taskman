@@ -7,6 +7,7 @@ import {
   FEATURES_DIR,
   PROJECT,
   STORE,
+  commitStore,
   createTaskViaAPI,
   finishTask,
   storeIsLocal,
@@ -63,17 +64,7 @@ test("a burst of concurrent feature creates are all committed, tree stays clean"
     if (fs.existsSync(file)) fs.rmSync(file);
   }
   if (featuresStatus().length) {
-    execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
-    execFileSync("git", [
-      "-C",
-      STORE,
-      "commit",
-      "-q",
-      "-m",
-      `chore(${PROJECT}): clean up concurrency regression features`,
-      "--",
-      `${PROJECT}/features`,
-    ]);
+    commitStore(`${PROJECT}/features`, `chore(${PROJECT}): clean up concurrency regression features`);
   }
 });
 
@@ -155,17 +146,7 @@ test("concurrent ship/unship at one feature never 500s, leaves one file, commits
     if (fs.existsSync(p)) fs.rmSync(p);
   }
   if (featuresStatus().length) {
-    execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
-    execFileSync("git", [
-      "-C",
-      STORE,
-      "commit",
-      "-q",
-      "-m",
-      `chore(${PROJECT}): clean up ship/unship race feature`,
-      "--",
-      `${PROJECT}/features`,
-    ]);
+    commitStore(`${PROJECT}/features`, `chore(${PROJECT}): clean up ship/unship race feature`);
   }
 });
 

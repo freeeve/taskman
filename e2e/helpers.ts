@@ -57,6 +57,46 @@ export function commitsSince(base: string): { subject: string; files: string[] }
   }));
 }
 
+/** Sleep synchronously; these helpers run in sync test/teardown code with no loop to yield to. */
+function sleepMs(ms: number): void {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Combined stdout+stderr+message of a failed execFileSync, for classifying git errors. */
+function gitErrText(err: unknown): string {
+  const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
+  return `${e.stdout ?? ""}${e.stderr ?? ""}${e.message ?? ""}`;
+}
+
+/**
+ * Stage and commit paths under `rel` in the store, resilient to lock contention.
+ *
+ * The store is multi-writer: other sessions (and taskman's own serialized
+ * mutations) commit concurrently, so a raw `git commit` here can lose the race
+ * for `.git/index.lock`. Left unhandled that throws (a flaky test failure); a
+ * blanket catch instead leaves changes staged-but-uncommitted (a dirty shared
+ * tree for the next run). So retry on lock contention, treat a genuine empty
+ * commit as success, and surface anything else. Every e2e path that writes the
+ * store directly (fixture edits, cleanup, teardown) must go through here.
+ */
+export function commitStore(rel: string, msg: string): void {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      execFileSync("git", ["-C", STORE, "add", "-A", "--", rel], { stdio: "pipe" });
+      execFileSync("git", ["-C", STORE, "commit", "-q", "-m", msg, "--", rel], { stdio: "pipe" });
+      return;
+    } catch (err) {
+      const text = gitErrText(err);
+      if (/nothing to commit|no changes added/i.test(text)) return; // already committed -- fine
+      if (attempt < 20 && /index\.lock|another git process|unable to create/i.test(text)) {
+        sleepMs(100); // a concurrent store writer holds the lock -- back off and retry
+        continue;
+      }
+      throw err; // an unexpected failure must not be silently swallowed
+    }
+  }
+}
+
 /**
  * Commit a feature file into the store so a direct-to-disk edit does not
  * leave the shared working tree dirty. The API commits its own mutations;
@@ -64,9 +104,7 @@ export function commitsSince(base: string): { subject: string; files: string[] }
  * expose, so they must tidy up after themselves.
  */
 function commitFeatureFile(slug: string): void {
-  const rel = `${PROJECT}/features/${slug}.md`;
-  execFileSync("git", ["-C", STORE, "add", "--", rel]);
-  execFileSync("git", ["-C", STORE, "commit", "-q", "-m", `chore(${PROJECT}): e2e edit ${slug}`, "--", rel]);
+  commitStore(`${PROJECT}/features/${slug}.md`, `chore(${PROJECT}): e2e edit ${slug}`);
 }
 
 /**

@@ -1,7 +1,6 @@
-import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
-import { PROJECT, SEEDS, STORE, storeIsLocal } from "./helpers";
+import { PROJECT, SEEDS, STORE, commitStore, storeIsLocal } from "./helpers";
 
 /**
  * Global teardown: reset the sandbox to its baseline so nothing accumulates.
@@ -42,47 +41,7 @@ function pruneScreenshots(): void {
     .filter((n) => fs.statSync(path.join(dir, n)).isDirectory());
   if (!subs.length) return;
   for (const n of subs) fs.rmSync(path.join(dir, n), { recursive: true, force: true });
-  commitPrune(`${PROJECT}/screenshots`);
-}
-
-/** Sleep synchronously; teardown is a plain sync function with no event loop to yield to. */
-function sleepMs(ms: number): void {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** Combined stdout+stderr+message of a failed execFileSync, for classifying git errors. */
-function gitErrText(err: unknown): string {
-  const e = err as { stdout?: Buffer | string; stderr?: Buffer | string; message?: string };
-  return `${e.stdout ?? ""}${e.stderr ?? ""}${e.message ?? ""}`;
-}
-
-/**
- * Stage and commit pruned paths under rel, resilient to store contention.
- *
- * The store is multi-writer: other sessions (and taskman's own serialized
- * mutations) commit concurrently, so `git commit` here can lose a race for
- * `.git/index.lock`. A blanket catch would swallow that lock error and leave
- * the deletions staged-but-uncommitted, dirtying the shared tree for the next
- * run. So retry on lock contention, treat a genuine empty commit as success,
- * and surface anything else.
- */
-function commitPrune(rel: string): void {
-  const msg = `chore(${PROJECT}): prune e2e ${rel} fixtures`;
-  for (let attempt = 0; ; attempt++) {
-    try {
-      execFileSync("git", ["-C", STORE, "add", "-A", "--", rel], { stdio: "pipe" });
-      execFileSync("git", ["-C", STORE, "commit", "-q", "-m", msg, "--", rel], { stdio: "pipe" });
-      return;
-    } catch (err) {
-      const text = gitErrText(err);
-      if (/nothing to commit|no changes added/i.test(text)) return; // already pruned -- fine
-      if (attempt < 20 && /index\.lock|another git process|unable to create/i.test(text)) {
-        sleepMs(100); // a concurrent store writer holds the lock -- back off and retry
-        continue;
-      }
-      throw err; // an unexpected failure must not be silently swallowed
-    }
-  }
+  commitStore(`${PROJECT}/screenshots`, `chore(${PROJECT}): prune e2e ${PROJECT}/screenshots fixtures`);
 }
 
 /** Mirror the Go store Slugify: lowercase, runs of non-alphanumerics -> one dash. */
@@ -104,5 +63,5 @@ function pruneDir(dir: string, drop: (name: string) => boolean, rel: string): vo
     }
   }
   if (!removed) return;
-  commitPrune(rel);
+  commitStore(rel, `chore(${PROJECT}): prune e2e ${rel} fixtures`);
 }

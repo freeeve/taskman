@@ -1,13 +1,12 @@
 import { test, expect, type Page } from "@playwright/test";
-import { execFileSync } from "child_process";
 import * as fs from "fs";
 import * as path from "path";
 import {
   BASE_URL,
   FEATURES_DIR,
   PROJECT,
-  STORE,
   appendFeatureBody,
+  commitStore,
   createTaskViaAPI,
   finishTask,
   gotoBoard,
@@ -131,17 +130,7 @@ test("a feature with a long unbreakable-word title stays within narrow viewports
 
   // Clean up the probe feature so the sandbox stays lean.
   fs.rmSync(path.join(FEATURES_DIR, `${slug}.md`));
-  execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
-  execFileSync("git", [
-    "-C",
-    STORE,
-    "commit",
-    "-q",
-    "-m",
-    `chore(${PROJECT}): clean up long-title responsive feature`,
-    "--",
-    `${PROJECT}/features`,
-  ]);
+  commitStore(`${PROJECT}/features`, `chore(${PROJECT}): clean up long-title responsive feature`);
 });
 
 test("a feature with a wide multi-digit rollup does not overflow at narrow widths (task 103)", async ({
@@ -223,17 +212,7 @@ test("a wide table in a feature spec scrolls in its own box, not the page", asyn
   }
 
   fs.rmSync(path.join(FEATURES_DIR, `${slug}.md`));
-  execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
-  execFileSync("git", [
-    "-C",
-    STORE,
-    "commit",
-    "-q",
-    "-m",
-    `chore(${PROJECT}): clean up wide-table responsive feature`,
-    "--",
-    `${PROJECT}/features`,
-  ]);
+  commitStore(`${PROJECT}/features`, `chore(${PROJECT}): clean up wide-table responsive feature`);
 });
 
 test("a wide code block in a task dialog scrolls in its own box, not the page", async ({ page }) => {
@@ -314,17 +293,7 @@ test("a spec's long unbreakable inline content wraps and never scrolls the page"
   }
 
   fs.rmSync(path.join(FEATURES_DIR, `${slug}.md`));
-  execFileSync("git", ["-C", STORE, "add", "-A", "--", `${PROJECT}/features`]);
-  execFileSync("git", [
-    "-C",
-    STORE,
-    "commit",
-    "-q",
-    "-m",
-    `chore(${PROJECT}): clean up long-inline responsive feature`,
-    "--",
-    `${PROJECT}/features`,
-  ]);
+  commitStore(`${PROJECT}/features`, `chore(${PROJECT}): clean up long-inline responsive feature`);
 });
 
 test("the project picker panel stays within a narrow viewport when open", async ({ page }) => {

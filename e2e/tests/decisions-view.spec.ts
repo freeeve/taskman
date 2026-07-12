@@ -194,3 +194,57 @@ test("the tab title and favicon badge the live cross-project decision count", as
 
   await finishTask(request, t.num);
 });
+
+test("a banner over the board announces waiting decisions, opens the inbox, and hides on the decisions view", async ({
+  page,
+  request,
+}) => {
+  // Beyond the header pill, a loud click-through strip sits above the columns
+  // while decisions await, so a project view can't be worked without the queue
+  // being obvious. It names the live cross-project count and hides on the
+  // decisions views themselves (where it would only point at the current view).
+  const banner = page.locator("#decisions-banner");
+  const liveCount = async () =>
+    (await (await request.get(`${BASE_URL}/api/decisions`)).json()).length;
+
+  const t = await createTaskViaAPI(request, uniqueDesc("dv-banner"));
+  poseDecision(t.num, "Banner?", ["Yes::a", "No::b"]);
+
+  // On the board the banner announces the live count with count-agreeing text.
+  await expect
+    .poll(
+      async () => {
+        await gotoBoard(page);
+        const c = await liveCount();
+        if (c === 0) return false; // our just-posed decision must be counted
+        const want =
+          c === 1
+            ? "1 decision is waiting on an answer · open the inbox"
+            : `${c} decisions are waiting on an answer · open the inbox`;
+        return (await banner.textContent()) === want && !(await banner.isHidden());
+      },
+      { timeout: 15_000, intervals: [400, 800, 1500] }
+    )
+    .toBe(true);
+
+  // Clicking the banner opens the cross-project inbox, where it hides itself.
+  await banner.click();
+  await expect(page).toHaveURL(/#\/decisions$/);
+  await expect(page.locator("#decisions")).toBeVisible();
+  await expect(banner).toBeHidden();
+
+  // Answering drops the count; back on the board the banner tracks it (hidden
+  // once nothing is left cross-project).
+  expect((await request.post(`${base}/tasks/${t.num}/answer`, { data: { choice: "Yes" } })).ok()).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        await gotoBoard(page);
+        return (await banner.isHidden()) === ((await liveCount()) === 0);
+      },
+      { timeout: 15_000, intervals: [400, 800, 1500] }
+    )
+    .toBe(true);
+
+  await finishTask(request, t.num);
+});

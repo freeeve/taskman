@@ -137,6 +137,40 @@ test("undo of a screenshot upload removes the image file and the body section to
   await finishTask(request, t.num);
 });
 
+test("undo of a task created against a feature removes the task and its link together (no dangling chip)", async ({
+  request,
+}) => {
+  // Creating a task linked to a feature is a single commit spanning two files
+  // (the task file plus the feature's Tasks: line). Reverting it must undo both,
+  // or the feature would keep a link to a task that no longer exists.
+  const created = await request.post(`${base}/features`, { data: { description: uniqueDesc("undo-linked") } });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+
+  const madeRes = await request.post(`${base}/tasks`, {
+    data: { description: uniqueDesc("undo-linked-child"), feature: slug },
+  });
+  expect(madeRes.status()).toBe(201);
+  const made = await madeRes.json();
+
+  const linked = async () =>
+    ((await (await request.get(`${base}/features`)).json()) as { slug: string; tasks: { num: number }[] }[])
+      .find((f) => f.slug === slug)!
+      .tasks.map((c) => c.num);
+  expect(await linked(), "the feature lists the new task").toContain(made.num);
+
+  // Undo the single linked-create commit.
+  const peek = await (await request.get(`${base}/undo`)).json();
+  expect(peek.subject).toContain(`(feature ${slug})`);
+  expect((await request.post(`${base}/undo`, { data: {} })).status()).toBe(200);
+
+  // The task is gone AND the link is removed -- not left as a "missing" chip.
+  expect((await request.get(`${base}/tasks/${made.num}`)).status()).toBe(404);
+  expect(await linked(), "the feature link is gone, not dangling").not.toContain(made.num);
+
+  await request.delete(`${base}/features/${slug}`);
+});
+
 test("undo of a title edit restores the original slug without orphaning a file", async ({
   request,
 }) => {

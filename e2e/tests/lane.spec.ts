@@ -86,3 +86,49 @@ test("the lane API sets, clears, and 404s an unknown task", async ({ request }) 
 
   await finishTask(request, t.num);
 });
+
+test("an over-long lane is refused with a clean message, not a raw filesystem error (task 117)", async ({
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("lane-toolong"));
+  expect((await request.post(`${base}/tasks/${t.num}/lane`, { data: { lane: "web" } })).status()).toBe(200);
+
+  const res = await request.post(`${base}/tasks/${t.num}/lane`, { data: { lane: "x".repeat(250) } });
+  expect(res.status()).toBe(400);
+  const err = (await res.json()).error as string;
+  expect(err).toContain("lane too long");
+  expect(err, "no raw ENAMETOOLONG surfaced").not.toMatch(/file name too long/i);
+  expect(err, "no internal filename leaked").not.toMatch(/\.md/);
+
+  // The prior lane survives -- the refusal happens before any rename.
+  const still = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(still.lane).toBe("web");
+
+  await finishTask(request, t.num);
+});
+
+test("an in-limit lane whose combined basename would exceed the filename limit is refused cleanly (task 117)", async ({
+  request,
+}) => {
+  // A valid (<200) but long slug plus an in-limit (<=40) lane can still push the
+  // whole basename past 255; that must be caught before any rename with an
+  // actionable message, not a raw ENAMETOOLONG.
+  const longDesc = Array.from({ length: 60 }, () => "ab").join("-") + `-${Date.now()}`; // ~193-char slug, unique
+  const t = await createTaskViaAPI(request, longDesc);
+
+  const res = await request.post(`${base}/tasks/${t.num}/lane`, { data: { lane: "a".repeat(40) } });
+  expect(res.status()).toBe(400);
+  const err = (await res.json()).error as string;
+  expect(err).toContain("name too long");
+  expect(err, "no raw ENAMETOOLONG surfaced").not.toMatch(/file name too long/i);
+
+  // Still laneless -- no partial rename.
+  const still = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(still.lane).toBe("");
+
+  await finishTask(request, t.num);
+});

@@ -214,6 +214,78 @@ func toJSON(t task.Task) taskJSON {
 	return out
 }
 
+// decisionRow is one live question for the decisions views: enough to list
+// and navigate, deliberately not the full body.
+type decisionRow struct {
+	Project  string `json:"project"`
+	Num      int    `json:"num"`
+	Slug     string `json:"slug"`
+	Title    string `json:"title"`
+	Question string `json:"question"`
+	Options  int    `json:"options"`
+}
+
+// scanDecisions collects one project's live decisions: deferred tasks whose
+// body carries an unanswered block. Plain reason-defers never appear.
+func scanDecisions(home, project string) ([]decisionRow, error) {
+	tasks, err := task.Load(filepath.Join(home, project, "tasks"))
+	if err != nil && !os.IsNotExist(err) {
+		return nil, err
+	}
+	rows := []decisionRow{}
+	for _, t := range tasks {
+		if !t.Deferred {
+			continue
+		}
+		body, err := os.ReadFile(t.Path())
+		if err != nil {
+			continue
+		}
+		d, live := task.ParseDecision(string(body))
+		if !live {
+			continue
+		}
+		rows = append(rows, decisionRow{
+			Project: project, Num: t.Num, Slug: t.Slug,
+			Title: title(string(body), t.Slug), Question: d.Question, Options: len(d.Options),
+		})
+	}
+	return rows, nil
+}
+
+// decisionsAll lists live decisions across every project: the inbox.
+func (s *server) decisionsAll(w http.ResponseWriter, r *http.Request) {
+	names, err := store.Projects(s.home)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	out := []decisionRow{}
+	for _, name := range names {
+		rows, err := scanDecisions(s.home, name)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		out = append(out, rows...)
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// decisionsProject lists one project's live decisions.
+func (s *server) decisionsProject(w http.ResponseWriter, r *http.Request) {
+	if _, err := s.projDir(r); err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	rows, err := scanDecisions(s.home, r.PathValue("p"))
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, rows)
+}
+
 // activity lists recent commits touching the project, newest first: the
 // audit trail as a read-only view. The summary strips the conventional
 // prefix for display; the raw subject rides along.

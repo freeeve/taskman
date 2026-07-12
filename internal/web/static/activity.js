@@ -45,11 +45,14 @@ async function loadActivity() {
 function showActivity() {
   activityVisible = true;
   featuresVisible = false;
+  if (typeof decisionsVisible !== "undefined") decisionsVisible = false;
   $("#board").hidden = true;
   $("#features").hidden = true;
+  $("#decisions").hidden = true;
   $("#activity").hidden = false;
   $("#tab-tasks").classList.remove("active");
   $("#tab-features").classList.remove("active");
+  $("#tab-decisions").classList.remove("active");
   $("#tab-activity").classList.add("active");
   loadActivity().catch(showError);
 }

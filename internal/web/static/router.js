@@ -8,8 +8,9 @@
 let applyingHash = false;
 
 function parseHash() {
+  if (location.hash === "#/decisions") return { inbox: true };
   const m = location.hash.match(
-    /^#\/p\/([a-z0-9][a-z0-9-]*)(?:\/(features|activity)|\/task\/(\d+)|\/feature\/([a-z0-9][a-z0-9-]*))?$/
+    /^#\/p\/([a-z0-9][a-z0-9-]*)(?:\/(features|activity|decisions)|\/task\/(\d+)|\/feature\/([a-z0-9][a-z0-9-]*))?$/
   );
   if (!m) return null;
   return { project: m[1], view: m[2] || "tasks", task: m[3] ? Number(m[3]) : null, feature: m[4] || null };
@@ -22,6 +23,11 @@ function parseHash() {
 // deep-linkable as one opened from a board card, and closing falls back to
 // the tab's hash via the dialog's close listener.
 function currentHash() {
+  if (typeof decisionsVisible !== "undefined" && decisionsVisible &&
+      !$("#task-dialog").open) {
+    if (decisionsScope === "all" || !state.project) return "#/decisions";
+    return `#/p/${state.project}/decisions`;
+  }
   if (!state.project) return "";
   const base = `#/p/${state.project}`;
   if ($("#task-dialog").open && state.dialogTask != null) return `${base}/task/${state.dialogTask}`;
@@ -43,6 +49,11 @@ async function applyHash() {
   if (!h) return;
   applyingHash = true;
   try {
+    if (h.inbox) {
+      if ($("#task-dialog").open) $("#task-dialog").close();
+      showDecisions("all");
+      return;
+    }
     if (h.project !== state.project && state.projects.some((p) => p.name === h.project)) {
       state.project = h.project;
       localStorage.setItem("taskman.project", state.project);
@@ -52,7 +63,9 @@ async function applyHash() {
       await loadTasks().catch(showError);
     }
     if ($("#task-dialog").open && !h.task) $("#task-dialog").close();
-    if (h.view === "activity") {
+    if (h.view === "decisions") {
+      showDecisions("project");
+    } else if (h.view === "activity") {
       showActivity();
     } else if (h.view === "features" || h.feature) {
       switchTab(true);
@@ -95,9 +108,10 @@ window.addEventListener("hashchange", applyHash);
 }
 $("#task-dialog").addEventListener("close", () => writeHash());
 $("#project").addEventListener("change", () => writeHash());
-for (const id of ["#tab-tasks", "#tab-features", "#tab-activity"]) {
+for (const id of ["#tab-tasks", "#tab-features", "#tab-activity", "#tab-decisions"]) {
   $(id).addEventListener("click", () => writeHash());
 }
+$("#decisions-pill").addEventListener("click", () => writeHash());
 // Spec panel toggles: non-bubbling, so capture. Only genuine user toggles
 // win the hash -- rebuild-fired toggles (renderFeatures recreating open
 // panels) are suppressed via renderingFeatures, or they feedback-loop with

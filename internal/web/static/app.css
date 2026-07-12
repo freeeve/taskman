@@ -470,6 +470,40 @@ main#features {
 
 .features-bar { display: flex; justify-content: flex-end; }
 
+main#decisions {
+  max-width: 760px;
+  margin: 0 auto;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.decisions-bar { display: flex; gap: 6px; }
+.decisions-bar button.active {
+  color: var(--text);
+  border-color: var(--accent);
+}
+
+.decision-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
+  text-align: left;
+  padding: 10px 14px;
+  background: var(--surface);
+  border: 1px solid var(--pending);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.decision-row:hover, .decision-row:focus-visible { border-color: var(--accent); }
+.decision-row-q { font-weight: 600; flex: 1 1 100%; overflow-wrap: anywhere; }
+.decision-row-where { color: var(--text-dim); font-size: 11px; overflow-wrap: anywhere; }
+.decision-row-opts { color: var(--text-dim); font-size: 11px; margin-left: auto; white-space: nowrap; }
+
 main#activity {
   max-width: 720px;
   margin: 0 auto;

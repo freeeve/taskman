@@ -925,6 +925,63 @@ func TestDuplicateNumberStemOpen(t *testing.T) {
 	}
 }
 
+// TestDecisionsLists pins the inbox surfaces: the cross-project list carries
+// every live question, the per-project route only its own, and plain
+// reason-defers never appear.
+func TestDecisionsLists(t *testing.T) {
+	home, srv := testStore(t)
+	block := "\n```decision\nquestion: Q-MYPROJ?\noptions:\n- label: a\n- label: b\n```\n"
+	path := filepath.Join(home, "myproj", "tasks", "004_held.deferred.md")
+	body, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, append(body, []byte(block)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Second project: one decision and one plain reason-defer.
+	other := filepath.Join(home, "otherproj", "tasks")
+	if err := os.MkdirAll(other, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dec2 := "# 001 -- Fork\n\n```decision\nquestion: Q-OTHER?\noptions:\n- label: x\n- label: y\n- label: z\n```\n"
+	if err := os.WriteFile(filepath.Join(other, "001_fork.deferred.md"), []byte(dec2), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(other, "002_plain.deferred.md"),
+		[]byte("# 002 -- Plain hold\n\n## Deferred\n\njust a reason\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var all []struct {
+		Project  string `json:"project"`
+		Num      int    `json:"num"`
+		Question string `json:"question"`
+		Options  int    `json:"options"`
+	}
+	if code := get(t, srv, "/api/decisions", &all); code != 200 {
+		t.Fatalf("inbox status %d", code)
+	}
+	if len(all) != 2 {
+		t.Fatalf("inbox = %+v (plain defers must not appear)", all)
+	}
+	seen := map[string]int{}
+	for _, row := range all {
+		seen[row.Project] = row.Options
+	}
+	if seen["myproj"] != 2 || seen["otherproj"] != 3 {
+		t.Errorf("inbox rows = %+v", all)
+	}
+
+	var one []struct {
+		Project string `json:"project"`
+	}
+	if code := get(t, srv, "/api/projects/otherproj/decisions", &one); code != 200 ||
+		len(one) != 1 || one[0].Project != "otherproj" {
+		t.Errorf("per-project = %+v", one)
+	}
+	if code := get(t, srv, "/api/projects/nope/decisions", nil); code != 404 {
+		t.Errorf("unknown project status %d", code)
+	}
+}
+
 // TestDecisionAPI drives the structured-question flow over HTTP: the flag
 // and parsed payload surface, plain resume refuses, answering validates,
 // records, un-defers, promotes to top-of-order, and stale answers 409.

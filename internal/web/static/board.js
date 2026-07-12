@@ -187,7 +187,7 @@ async function loadTasks() {
       .filter((n) => counts[n] > 1)
       .map(Number)
   );
-  updateDecisionsPill();
+  updateDecisionsPill().catch(() => {});
   const sel = $("#lane");
   const current = state.lane;
   sel.replaceChildren(new Option("all lanes", ""));
@@ -712,14 +712,15 @@ function renderActions(t) {
   }
 }
 
-// updateDecisionsPill surfaces the count of unanswered decisions in the
-// header so they are findable without hunting the deferred filter; clicking
-// it turns the deferred toggle on so the badged cards show.
-function updateDecisionsPill() {
+// updateDecisionsPill surfaces the CROSS-PROJECT count of unanswered
+// decisions in the header: the inbox exists so something needing you is
+// visible whichever project is open. Clicking it opens the decisions view
+// (wired in decisions.js).
+async function updateDecisionsPill() {
+  const rows = await api("/api/decisions");
   const pill = $("#decisions-pill");
-  const count = state.tasks.filter((t) => t.has_decision).length;
-  pill.hidden = count === 0;
-  pill.textContent = count === 1 ? "1 decision" : `${count} decisions`;
+  pill.hidden = rows.length === 0;
+  pill.textContent = rows.length === 1 ? "1 decision" : `${rows.length} decisions`;
 }
 
 // undoLast reverts the project's newest taskman commit after showing the
@@ -774,11 +775,6 @@ function wire() {
   wireLightDismiss();
   $("#new-task").addEventListener("click", newTask);
   $("#undo").addEventListener("click", undoLast);
-  $("#decisions-pill").addEventListener("click", () => {
-    state.showDeferred = true;
-    $("#show-deferred").checked = true;
-    render();
-  });
 }
 
 // dialogDirty reports whether an open editor holds unsaved changes: the

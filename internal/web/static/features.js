@@ -6,12 +6,21 @@
 
 let featuresVisible = false;
 
+// switchTab is also called programmatically by the router, so it must hide
+// EVERY other view, not rely on tab-click listeners (typeof guards: the
+// later-loaded scripts own those flags).
 function switchTab(toFeatures) {
   featuresVisible = toFeatures;
+  if (typeof activityVisible !== "undefined") activityVisible = false;
+  if (typeof decisionsVisible !== "undefined") decisionsVisible = false;
   $("#board").hidden = toFeatures;
   $("#features").hidden = !toFeatures;
+  $("#activity").hidden = true;
+  $("#decisions").hidden = true;
   $("#tab-tasks").classList.toggle("active", !toFeatures);
   $("#tab-features").classList.toggle("active", toFeatures);
+  $("#tab-activity").classList.remove("active");
+  $("#tab-decisions").classList.remove("active");
   if (toFeatures) loadFeatures().catch(showError);
 }
 

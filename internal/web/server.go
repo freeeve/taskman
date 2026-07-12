@@ -22,6 +22,8 @@ func Handler(home string) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/projects", s.projects)
 	mux.HandleFunc("GET /api/search", s.search)
+	mux.HandleFunc("GET /api/decisions", s.decisionsAll)
+	mux.HandleFunc("GET /api/projects/{p}/decisions", s.decisionsProject)
 	mux.HandleFunc("GET /api/projects/{p}/tasks", s.tasks)
 	mux.HandleFunc("GET /api/projects/{p}/tasks/{n}", s.taskDetail)
 	mux.HandleFunc("GET /api/projects/{p}/features", s.features)

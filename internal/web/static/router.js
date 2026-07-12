@@ -79,8 +79,22 @@ async function applyHash() {
         }
       }
     } else {
-      switchTab(false);
-      if (h.task) await openTask(h.task).catch(() => {});
+      // A task hash carries no record of the tab behind the dialog. When it
+      // arrives because the dialog just opened over a non-tasks view (a
+      // feature chip, for instance), that view must survive: the dialog is
+      // a modal over it, and switching tabs here would strand the user and
+      // stop mutate() from refreshing the view behind. A task hash with no
+      // dialog open (deep link, back/forward) still lands on tasks.
+      const overOtherView =
+        $("#task-dialog").open &&
+        h.task === state.dialogTask &&
+        ((typeof featuresVisible !== "undefined" && featuresVisible) ||
+          (typeof activityVisible !== "undefined" && activityVisible) ||
+          (typeof decisionsVisible !== "undefined" && decisionsVisible));
+      if (!overOtherView) {
+        switchTab(false);
+        if (h.task) await openTask(h.task).catch(() => {});
+      }
     }
   } finally {
     applyingHash = false;

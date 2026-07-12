@@ -455,6 +455,65 @@ func TestDecisionFlow(t *testing.T) {
 	}
 }
 
+// TestDecisionSurfacing pins the answer queue's CLI visibility: list splits
+// "deferred" from "awaiting a decision", an empty top names pending
+// decisions, and decisions -all sweeps every project with a project column
+// (task 119).
+func TestDecisionSurfacing(t *testing.T) {
+	home, _ := storeLedger(t, "decsurf",
+		"001_open-work.md", "002_needs-answer.md", "003_plain-hold.md")
+	if err := run([]string{"defer", "-question", "Ship or wait?",
+		"-option", "Ship::now", "-option", "Wait::later", "2"}); err != nil {
+		t.Fatalf("defer -question: %v", err)
+	}
+	if err := run([]string{"defer", "-reason", "blocked on vendor", "3"}); err != nil {
+		t.Fatalf("reason-only defer: %v", err)
+	}
+
+	// list separates the answerable subset from plain holds.
+	out := capture(t, func() { _ = run([]string{"list"}) })
+	if !strings.Contains(out, "2 deferred (taskman list -all)") ||
+		!strings.Contains(out, "1 awaiting a decision (taskman decisions)") {
+		t.Errorf("list surfacing:\n%s", out)
+	}
+
+	// top with work available stays a bare path; an empty sweep (lane
+	// filter matches nothing) names the pending decisions.
+	out = capture(t, func() { _ = run([]string{"top"}) })
+	if !strings.Contains(out, "001_open-work.md") || strings.Contains(out, "decision") {
+		t.Errorf("non-empty top must stay a bare path:\n%s", out)
+	}
+	err := run([]string{"top", "-lane", "impl"})
+	if err == nil || !strings.Contains(err.Error(), "no pending tasks") ||
+		!strings.Contains(err.Error(), "1 deferred await a decision (taskman decisions)") {
+		t.Errorf("empty top = %v", err)
+	}
+
+	// A second project's decision shows up in the store-wide sweep with a
+	// project column; the per-project view stays scoped.
+	otherDir := filepath.Join(home, "otherproj", "tasks")
+	if err := os.MkdirAll(otherDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(otherDir, "001_pick-db.md"),
+		[]byte("# 001 -- Pick db\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := run([]string{"defer", "-p", "otherproj", "-question", "Which db?",
+		"-option", "A::a", "-option", "B::b", "1"}); err != nil {
+		t.Fatalf("other-project defer: %v", err)
+	}
+	out = capture(t, func() { _ = run([]string{"decisions", "-all"}) })
+	if !strings.Contains(out, "decsurf") || !strings.Contains(out, "Ship or wait?") ||
+		!strings.Contains(out, "otherproj") || !strings.Contains(out, "Which db?") {
+		t.Errorf("decisions -all:\n%s", out)
+	}
+	out = capture(t, func() { _ = run([]string{"decisions"}) })
+	if strings.Contains(out, "Which db?") {
+		t.Errorf("per-project decisions must stay scoped:\n%s", out)
+	}
+}
+
 // TestVersion pins the skew diagnostic: version always prints something and
 // never errors, whatever build info is present.
 func TestVersion(t *testing.T) {

@@ -139,7 +139,8 @@ Usage:
                                answer the task's decision and jump it to the
                                top of the priority order (-choose-other for
                                free text)
-  taskman decisions            tasks holding an unanswered decision
+  taskman decisions [-all]     tasks holding an unanswered decision; -all
+                               sweeps every project in the store
   taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
   taskman feature new <description>
                                create a feature spec in features/ (source of

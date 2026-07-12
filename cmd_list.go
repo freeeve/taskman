@@ -77,13 +77,16 @@ func cmdList(args []string) error {
 	dups := task.Dups(p.Tasks)
 	ordered := store.SortByOrder(p.Tasks, store.ReadOrder(filepath.Dir(p.Dir)))
 	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
-	shown, deferred := 0, 0
+	shown, deferred, decisions := 0, 0, 0
 	for _, t := range ordered {
 		if *lane != "" && t.Lane != *lane {
 			continue
 		}
 		if t.Deferred && t.Status != task.Done {
 			deferred++
+			if hasLiveDecision(t) {
+				decisions++
+			}
 		}
 		if (t.Status == task.Done || t.Deferred) && !*all {
 			continue
@@ -106,7 +109,32 @@ func cmdList(args []string) error {
 	if deferred > 0 && !*all {
 		fmt.Printf("%d deferred (taskman list -all)\n", deferred)
 	}
+	if decisions > 0 {
+		fmt.Printf("%d awaiting a decision (taskman decisions)\n", decisions)
+	}
 	return nil
+}
+
+// hasLiveDecision reports whether a task's body holds an unanswered decision
+// block -- the "waiting on an answerable question" subset of deferrals.
+func hasLiveDecision(t task.Task) bool {
+	body, err := os.ReadFile(t.Path())
+	if err != nil {
+		return false
+	}
+	_, live := task.ParseDecision(string(body))
+	return live
+}
+
+// liveDecisions counts the ledger's tasks holding an unanswered decision.
+func liveDecisions(tasks []task.Task) int {
+	n := 0
+	for _, t := range tasks {
+		if t.Deferred && t.Status != task.Done && hasLiveDecision(t) {
+			n++
+		}
+	}
+	return n
 }
 
 // cmdTop prints the path of the highest-priority open task: the first
@@ -133,10 +161,16 @@ func cmdTop(args []string) error {
 		fmt.Println(t.Path())
 		return nil
 	}
+	// An empty top names pending decisions: a session that finds no work
+	// learns the ledger is waiting on an answer, not actually idle.
+	msg := fmt.Sprintf("no pending tasks in project %s", p.Name)
 	if *lane != "" {
-		return fmt.Errorf("no pending tasks in project %s lane %s", p.Name, *lane)
+		msg = fmt.Sprintf("%s lane %s", msg, *lane)
 	}
-	return fmt.Errorf("no pending tasks in project %s", p.Name)
+	if n := liveDecisions(p.Tasks); n > 0 {
+		msg = fmt.Sprintf("%s; %d deferred await a decision (taskman decisions)", msg, n)
+	}
+	return fmt.Errorf("%s", msg)
 }
 
 // cmdNext prints the next free number.
@@ -155,21 +189,60 @@ func cmdNext(args []string) error {
 }
 
 // cmdDecisions lists tasks holding an unanswered decision -- the human's
-// answer queue.
+// answer queue. -all sweeps every project in the store, like the web inbox.
 func cmdDecisions(args []string) error {
 	fs := flag.NewFlagSet("decisions", flag.ContinueOnError)
 	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	all := fs.Bool("all", false, "every project in the store, with a project column")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
+	if *all {
+		home, err := store.Ensure()
+		if err != nil {
+			return err
+		}
+		names, err := store.Projects(home)
+		if err != nil {
+			return err
+		}
+		shown := 0
+		for _, name := range names {
+			tasks, err := task.Load(filepath.Join(home, name, "tasks"))
+			if err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			shown += printDecisions(w, tasks, name)
+		}
+		if err := w.Flush(); err != nil {
+			return err
+		}
+		if shown == 0 {
+			fmt.Println("no unanswered decisions in the store")
+		}
+		return nil
 	}
 	p, err := openProject(*project)
 	if err != nil {
 		return err
 	}
-	w := tabwriter.NewWriter(os.Stdout, 2, 8, 2, ' ', 0)
+	shown := printDecisions(w, p.Tasks, "")
+	if err := w.Flush(); err != nil {
+		return err
+	}
+	if shown == 0 {
+		fmt.Printf("no unanswered decisions in project %s\n", p.Name)
+	}
+	return nil
+}
+
+// printDecisions writes one row per unanswered decision in tasks, prefixed
+// with the project column when project is non-empty, returning the count.
+func printDecisions(w *tabwriter.Writer, tasks []task.Task, project string) int {
 	shown := 0
-	for _, t := range p.Tasks {
-		if !t.Deferred {
+	for _, t := range tasks {
+		if !t.Deferred || !t.HasNum {
 			continue
 		}
 		body, err := os.ReadFile(t.Path())
@@ -178,16 +251,14 @@ func cmdDecisions(args []string) error {
 		}
 		if d, live := task.ParseDecision(string(body)); live {
 			shown++
-			fmt.Fprintf(w, "%03d\t%s\t%s\n", t.Num, t.Slug, d.Question)
+			if project != "" {
+				fmt.Fprintf(w, "%s\t%03d\t%s\t%s\n", project, t.Num, t.Slug, d.Question)
+			} else {
+				fmt.Fprintf(w, "%03d\t%s\t%s\n", t.Num, t.Slug, d.Question)
+			}
 		}
 	}
-	if err := w.Flush(); err != nil {
-		return err
-	}
-	if shown == 0 {
-		fmt.Printf("no unanswered decisions in project %s\n", p.Name)
-	}
-	return nil
+	return shown
 }
 
 // cmdProjects lists the store's projects with open and deferred counts.

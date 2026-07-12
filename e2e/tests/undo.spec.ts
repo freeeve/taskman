@@ -2,6 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   BASE_URL,
   PROJECT,
+  TINY_PNG,
   commitsSince,
   createTaskViaAPI,
   decisionPoseSupported,
@@ -103,6 +104,37 @@ test("the undo chain keeps working past a redo: undo, redo, then undo again all 
   expect(await present()).toBe(404);
   expect(await peekStatus()).toBe(200);
   // Task ends reverted-away: no file lingers, nothing to finish.
+});
+
+test("undo of a screenshot upload removes the image file and the body section together", async ({
+  request,
+}) => {
+  // A screenshot upload is the one mutation that commits a binary asset plus a
+  // body section in a single commit; reverting it must reverse both atomically.
+  const t = await createTaskViaAPI(request, uniqueDesc("undo-shot"));
+  const up = await request.post(`${base}/tasks/${t.num}/screenshots`, {
+    multipart: { file: { name: "shot.png", mimeType: "image/png", buffer: TINY_PNG } },
+  });
+  expect(up.status()).toBe(201);
+  const file = ((await up.json()).path as string).split("/").pop() as string;
+  const shotUrl = `${BASE_URL}/shots/${PROJECT}/${t.num}/${file}`;
+
+  // The upload linked the image in the body and it serves.
+  const before = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(before.body).toContain(file);
+  expect((await request.get(shotUrl)).status()).toBe(200);
+
+  // Undo reverts the single "screenshot for ..." commit.
+  const peek = await (await request.get(`${base}/undo`)).json();
+  expect(peek.subject).toMatch(/screenshot for/);
+  expect((await request.post(`${base}/undo`, { data: {} })).status()).toBe(200);
+
+  // Body section gone, image no longer served -- neither half survives.
+  const after = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(after.body, "the screenshot section is gone from the body").not.toContain(file);
+  expect((await request.get(shotUrl)).status(), "the image no longer serves").toBe(404);
+
+  await finishTask(request, t.num);
 });
 
 test("undo of a title edit restores the original slug without orphaning a file", async ({

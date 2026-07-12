@@ -170,22 +170,87 @@ prunes order-file entries whose tasks are gone or done.
 
 ## Agent sessions
 
-Put the convention in the **global** `~/.claude/CLAUDE.md` once -- project
-names resolve from the repo you're standing in, so the same text serves
-every repo:
+The store is built for several autonomous coding sessions working the same
+projects at once. The setup that works: put the conventions in the
+**global** agent config once (project names resolve from the repo you're
+standing in, so the same text serves every repo), give each session a lane,
+and drive each session with a recurring "work your lane" loop.
+
+### Global conventions (`~/.claude/CLAUDE.md` or equivalent)
 
 ```markdown
 ## Task tracking
 Tasks live in the central taskman store (~/.taskman), one dir per project;
 the project resolves from the enclosing repo's basename (pin long sessions
-with TASKMAN_PROJECT). Sessions with a role use a lane (impl | e2e).
+with TASKMAN_PROJECT). Sessions with a role use a lane (impl | e2e | ...).
 - Pick work: `taskman top -lane <lane>`, then `taskman start <n>` ->
-  work -> commit -> append an Outcome section -> `taskman done <n>`.
+  work -> semantic commit(s) in the code repo -> append an Outcome section
+  to the task file -> `taskman done <n>` (commits outcome + rename together).
 - New work: `taskman new -lane <lane> <desc>`. Ask another project:
-  `taskman file <project> <desc>`.
+  `taskman file <project> <desc>` -- a BARE project name, never a path.
+- Use the taskman CLI for ALL ledger chores; never rename task files by
+  hand and never fold ledger renames into code commits -- taskman commits
+  every mutation itself, pathspec-scoped.
+- Only modify your session's own working repo. If another repo needs a
+  change, file a task there instead of editing it.
+- Never leak task numbers into production code, help text, errors, or
+  logs -- they're tracker-internal. (Exception: a test may cite the task a
+  regression covers.) Put the "why" in the task file or commit message.
+- Duplicate numbers happen (the store is multi-writer and allocation has
+  no cross-process lock): when a number shows twice, `taskman fix`.
 - Never read ~/.taskman/<project>/screenshots/ -- images are for the web UI
   (`taskman serve`). Task bodies may link them; ignore the links.
 ```
+
+### Startup loops
+
+Each session runs one standing loop (in Claude Code: `/loop 15m <prompt>`;
+any scheduler that re-prompts the session works). The prompt is the whole
+contract: sweep the lane, work each task through the full flow, and do
+*nothing* when the lane is empty -- an idle cycle costs one `taskman top`.
+
+The implementation session owns the code and releases:
+
+```
+Work the <project> impl lane: run `taskman top -lane impl` (also check
+`taskman list` for unlaned open tasks). For each open task:
+`taskman start <n>`, implement it following the repo conventions (tests,
+formatting, semantic commit), push, append an Outcome section to the task
+file, then `taskman done <n>`. Do not touch e2e/ (the e2e session owns it)
+or other repos; file cross-project asks with `taskman file`. If there are
+no open impl tasks, do nothing and wait for the next cycle.
+```
+
+The e2e session owns only the test suite and *files* everything it finds:
+
+```
+Work the <project> e2e lane: probe the running app end to end and lock in
+behavior as tests under e2e/ -- the only directory this session writes.
+File every defect as an impl task (`taskman new -lane impl "<symptom;
+root cause; suggested fix>"`) with enough body that impl needs no shared
+context; never fix product code yourself. If nothing new surfaced, re-run
+the suite and wait for the next cycle.
+```
+
+On multi-module projects, lanes double as module ownership (`api`, `ui`,
+`worker`, ...): one session per module, same loop shape with its own lane
+token. Numbers stay one sequence per project, so one order file still
+ranks priority across all lanes.
+
+What makes this safe to leave running:
+
+- **Disjoint ownership.** Each session writes only its own directories
+  (impl: the code; e2e: `e2e/`; per-module lanes: their module). Sessions
+  never edit each other's territory -- they file tasks instead.
+- **Tasks are the channel.** A filed task carries symptom, root cause, and
+  suggested fix in the body, so the receiving session needs no shared
+  conversation state. The Outcome section closes the loop the same way.
+- **Every mutation is a scoped commit.** Concurrent sessions -- even on the
+  same project -- never sweep each other's files into a commit, and the
+  store's git history is the audit trail (and the undo).
+- **Deferral absorbs the human.** Anything waiting on a person's call gets
+  `taskman defer -reason` (optionally with a posed decision) and drops out
+  of every `top` sweep until someone answers on the board.
 
 ## Install
 

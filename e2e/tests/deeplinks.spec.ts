@@ -53,6 +53,37 @@ test("a bogus feature slug in the hash falls back to the features view without e
   await expect(page.locator(`.feature-card[data-slug="no-such-feature-zzz-999"]`)).toHaveCount(0);
 });
 
+test("a nonexistent task number in the hash falls back to the board without an error state", async ({
+  page,
+}) => {
+  // The task load 404s and its rejection is swallowed by design (router's
+  // "never an error state" contract). No dialog opens, the board still renders,
+  // and no unhandled page error escapes -- guarding the empty-catch path.
+  const pageErrors: string[] = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+
+  await page.goto(`/#/p/${PROJECT}/task/99999`);
+  await expect(page.locator("#board")).toBeVisible();
+  await expect(page.locator("#task-dialog")).not.toBeVisible();
+  await expect(page.locator("#tab-tasks")).toHaveClass(/active/);
+  expect(pageErrors, `unhandled page errors: ${pageErrors.join("; ")}`).toEqual([]);
+});
+
+test("a nonexistent project in the hash keeps a valid project loaded, not a broken view", async ({
+  page,
+}) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (e) => pageErrors.push(String(e)));
+
+  // An unknown project name never matches state.projects, so the router leaves
+  // the current (valid) project loaded rather than blanking the board.
+  await page.goto(`/#/p/nonesuch-project-zzz-999/task/1`);
+  await expect(page.locator("#board")).toBeVisible();
+  const proj = await page.locator("#project").inputValue();
+  expect(proj).not.toBe("nonesuch-project-zzz-999");
+  expect(pageErrors, `unhandled page errors: ${pageErrors.join("; ")}`).toEqual([]);
+});
+
 test("a shipped feature's deep link still opens its panel (slug, not slug.done)", async ({
   page,
   request,

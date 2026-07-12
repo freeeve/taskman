@@ -287,6 +287,37 @@ test("a spec's raw HTML is neutralized, not rendered live (no script/onerror inj
   expect(html).not.toMatch(/href="javascript:/i);
 });
 
+test("a feature title carrying markup renders as inert text, not live HTML (no injection)", async ({
+  page,
+  request,
+}) => {
+  // The card title (h3) is a SEPARATE render path from the sanitized spec body
+  // above -- it is set via textContent, so a title (or an H1 a body edit
+  // rewrites it to) that carries markup can never inject an element or fire a
+  // handler. A future switch to innerHTML here would be stored XSS.
+  const marker = `titlexss${Date.now()}`;
+  const created = await request.post(`${base}/features`, {
+    data: { description: `<img src=x onerror="window.__xss=1"> <b>b</b> ${marker}` },
+  });
+  expect(created.status()).toBe(201);
+  const { slug } = await created.json();
+
+  await gotoFeatures(page);
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await expect(card).toBeVisible();
+
+  const probe = await card.locator("h3").evaluate((h3) => ({
+    xssFired: (window as unknown as { __xss?: number }).__xss === 1,
+    injectedEls: h3.childElementCount,
+    text: h3.textContent ?? "",
+  }));
+  expect(probe.xssFired, "a title handler executed").toBe(false);
+  expect(probe.injectedEls, "raw markup became live elements").toBe(0);
+  expect(probe.text).toContain("<img");
+
+  await request.delete(`${base}/features/${slug}`);
+});
+
 test("a spec's GFM task list renders read-only checkboxes", async ({ page, request }) => {
   test.skip(!storeIsLocal(), "store is not local to the test runner");
 

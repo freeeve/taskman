@@ -259,8 +259,15 @@ What makes this safe to leave running:
   same project -- never sweep each other's files into a commit, and the
   store's git history is the audit trail (and the undo).
 - **Deferral absorbs the human.** Anything waiting on a person's call gets
-  `taskman defer -reason` (optionally with a posed decision) and drops out
-  of every `top` sweep until someone answers on the board.
+  `taskman defer -reason` (or a posed decision, `defer -question -option
+  "Label::why" ...`) and drops out of every `top` sweep until someone answers
+  on the board. A blocked loop *poses* its blockers this way -- it never idles
+  reciting an "open set" or "waiting on you" list into its turn output.
+  Narrated blockers are invisible: the human only sees what reaches the
+  decisions inbox and the `(N) taskman` tab badge. So a choice among options
+  becomes one decision with an option per choice, a confirmation becomes a
+  yes/no decision, and a bare hold becomes a `defer -reason`. If nothing is
+  posed and nothing is unblocked, the correct turn is silence, not narration.
 
 ## Install
 

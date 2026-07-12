@@ -99,20 +99,22 @@ test("a board card is a focusable role=button and Enter opens its detail", async
 test("the dialog offers the lifecycle actions valid for the task's state", async ({
   page,
 }) => {
+  // "edit" is always present (the lane control is a <select>, not a button);
+  // the state-dependent lifecycle actions follow it.
   const pending = await taskByTitle(page.request, SEEDS.pendingWeb);
   await openCard(page, pending.num);
-  await expect(page.locator("#dialog-actions button")).toHaveText(["start", "done", "defer"]);
+  await expect(page.locator("#dialog-actions button")).toHaveText(["edit", "start", "done", "defer"]);
   await page.locator("#dialog-close").click();
 
   const inProgress = await taskByTitle(page.request, SEEDS.inProgress);
   await openCard(page, inProgress.num);
-  await expect(page.locator("#dialog-actions button")).toHaveText(["done", "reopen", "defer"]);
+  await expect(page.locator("#dialog-actions button")).toHaveText(["edit", "done", "reopen", "defer"]);
   await page.locator("#dialog-close").click();
 
   await page.locator("#show-deferred").check();
   const deferred = await taskByTitle(page.request, SEEDS.deferred);
   await openCard(page, deferred.num);
-  await expect(page.locator("#dialog-actions button")).toHaveText(["resume"]);
+  await expect(page.locator("#dialog-actions button")).toHaveText(["edit", "resume"]);
 });
 
 test("the view tabs form an ARIA tablist with aria-selected and arrow-key navigation (task 111)", async ({

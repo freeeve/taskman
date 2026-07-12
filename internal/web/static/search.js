@@ -43,6 +43,8 @@ function searchRow(hit) {
   return row;
 }
 
+const SEARCH_LIMIT = 30;
+
 async function runSearch() {
   const q = $("#search").value.trim();
   const box = $("#search-results");
@@ -50,14 +52,24 @@ async function runSearch() {
     hideSearchResults();
     return;
   }
-  const hits = await api(`/api/search?q=${encodeURIComponent(q)}&limit=30`);
+  // One extra hit is fetched purely as the truncation signal, so the wire
+  // shape stays a bare list and the footer never lies about an exact cut.
+  const hits = await api(`/api/search?q=${encodeURIComponent(q)}&limit=${SEARCH_LIMIT + 1}`);
+  const truncated = hits.length > SEARCH_LIMIT;
+  const shown = truncated ? hits.slice(0, SEARCH_LIMIT) : hits;
   box.replaceChildren();
-  for (const hit of hits) box.append(searchRow(hit));
-  if (!hits.length) {
+  for (const hit of shown) box.append(searchRow(hit));
+  if (!shown.length) {
     const none = document.createElement("div");
     none.className = "search-row dim";
     none.textContent = "no matches";
     box.append(none);
+  }
+  if (truncated) {
+    const more = document.createElement("div");
+    more.className = "search-row dim";
+    more.textContent = `showing top ${SEARCH_LIMIT} — refine your search to see more`;
+    box.append(more);
   }
   box.hidden = false;
 }

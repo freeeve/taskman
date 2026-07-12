@@ -88,6 +88,35 @@ test("raw HTML in an edited task body is neutralized, not rendered live", async 
   await finishTask(request, t.num);
 });
 
+test("dangerous-scheme markdown links in a task body are rendered with a blanked href", async ({
+  request,
+}) => {
+  // Distinct from raw-HTML neutralization: a markdown-syntax link
+  // [x](javascript:...) is not raw HTML, so goldmark renders a real <a>. Its
+  // renderer must strip javascript:/data:text-html/vbscript: schemes (blank
+  // href) so a click cannot execute, while a safe https link survives.
+  const t = await createTaskViaAPI(request, uniqueDesc("edit-scheme"));
+  await request.put(`${base}/tasks/${t.num}`, {
+    data: {
+      body: [
+        "[js](javascript:alert(document.domain))",
+        "[data](data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==)",
+        "[vb](vbscript:msgbox(1))",
+        "[ok](https://example.com/x)",
+      ].join("\n\n"),
+    },
+  });
+
+  const { html } = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(html).not.toMatch(/href="javascript:/i);
+  expect(html).not.toMatch(/href="data:text\/html/i);
+  expect(html).not.toMatch(/href="vbscript:/i);
+  // The safe external link is preserved (and opened in a new tab).
+  expect(html).toContain(`href="https://example.com/x"`);
+
+  await finishTask(request, t.num);
+});
+
 test("an edit with neither title nor body is a clean 400", async ({ request }) => {
   const t = await createTaskViaAPI(request, uniqueDesc("edit-empty"));
   const res = await request.put(`${base}/tasks/${t.num}`, { data: {} });

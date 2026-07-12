@@ -209,6 +209,16 @@ any scheduler that re-prompts the session works). The prompt is the whole
 contract: sweep the lane, work each task through the full flow, and do
 *nothing* when the lane is empty -- an idle cycle costs one `taskman top`.
 
+Size the interval to your token budget: a timed loop matched to your
+plan's credit is what keeps sessions from exhausting the short rolling
+rate-limit windows. Idle sweeps are nearly free; cycles that *find work*
+are not, and every concurrent session draws on the same window. On a $200
+(20x) plan, 5-10 minutes per session is comfortable for a project or two;
+running many projects (or more sessions per project), stretch it somewhat
+-- 15-30 minutes -- so simultaneous working cycles don't stack up against
+the cap. Tasks queue harmlessly in the ledger either way; a longer
+interval only delays pickup, it never loses work.
+
 The implementation session owns the code and releases:
 
 ```

@@ -6,6 +6,7 @@ import {
   decisionPoseSupported,
   finishTask,
   gotoBoard,
+  openDecisionViaInbox,
   poseDecision,
   storeIsLocal,
   uniqueDesc,
@@ -61,12 +62,20 @@ test("the header pill and card badge surface an unanswered decision", async ({ p
   await expect(pill).toBeVisible();
   await expect(pill).toContainText("decision");
 
-  // A deferred task is hidden until the pill reveals it; clicking the pill
-  // turns on the deferred filter so the badged card shows.
-  await pill.click();
+  // On the board, revealing deferred cards shows the badged card.
+  await page.locator("#show-deferred").check();
   const card = page.locator(`[data-num="${t.num}"]`);
   await expect(card).toBeVisible();
   await expect(card.locator(".badge.decision")).toHaveText("decision needed");
+
+  // The pill opens the decisions inbox, which lists the unanswered decision
+  // with its question, not the board.
+  await pill.click();
+  const row = page.locator(".decision-row", {
+    hasText: `${PROJECT} ${String(t.num).padStart(3, "0")} ·`,
+  });
+  await expect(row).toBeVisible();
+  await expect(row).toContainText(Q);
 
   await finishTask(request, t.num);
 });
@@ -78,8 +87,7 @@ test("answering an option in the dialog un-defers the task and promotes it to th
   const t = await createTaskViaAPI(request, uniqueDesc("dec-answer"));
   poseDecision(t.num, Q, OPTS);
   await gotoBoard(page);
-  await page.locator("#decisions-pill").click();
-  await page.locator(`[data-num="${t.num}"]`).click();
+  await openDecisionViaInbox(page, t.num);
 
   // The dialog renders the question and one button per option with its explain.
   const box = page.locator(".decision-box");
@@ -148,8 +156,7 @@ test("the dialog shows the decision as its widget, not a raw fenced code block (
   const t = await createTaskViaAPI(request, uniqueDesc("dec-nofence"));
   poseDecision(t.num, Q, OPTS);
   await gotoBoard(page);
-  await page.locator("#decisions-pill").click();
-  await page.locator(`[data-num="${t.num}"]`).click();
+  await openDecisionViaInbox(page, t.num);
 
   // The interactive widget renders...
   await expect(page.locator(".decision-box .decision-question")).toContainText(Q);
@@ -186,8 +193,7 @@ test("answering via the Other free-text field records the note and promotes the 
   const t = await createTaskViaAPI(request, uniqueDesc("dec-other"));
   poseDecision(t.num, Q, OPTS);
   await gotoBoard(page);
-  await page.locator("#decisions-pill").click();
-  await page.locator(`[data-num="${t.num}"]`).click();
+  await openDecisionViaInbox(page, t.num);
 
   const other = "neither -- add a circuit breaker";
   await page.locator(".decision-other input").fill(other);
@@ -219,8 +225,7 @@ test("a decision option's label is rendered as text, not live HTML (no injection
     "Safe choice::fine",
   ]);
   await gotoBoard(page);
-  await page.locator("#decisions-pill").click();
-  await page.locator(`[data-num="${t.num}"]`).click();
+  await openDecisionViaInbox(page, t.num);
 
   const box = page.locator(".decision-box");
   await expect(box.locator(".decision-option")).toHaveCount(2);

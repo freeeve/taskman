@@ -209,6 +209,23 @@ export function poseDecision(num: number, question: string, options: string[]): 
   execFileSync(taskmanBin(), args, { encoding: "utf8" });
 }
 
+/**
+ * Open a posed decision's answer dialog through the header pill and the
+ * decisions inbox it reveals. The pill no longer toggles the board's deferred
+ * filter; it opens the cross-project inbox, whose rows deep-link into the task
+ * dialog where the answer widget lives. Rows carry no data-num, so the row is
+ * matched by its "{project} {padded-num} ·" locator text.
+ */
+export async function openDecisionViaInbox(
+  page: Page,
+  num: number,
+  project: string = PROJECT
+): Promise<void> {
+  await page.locator("#decisions-pill").click();
+  const where = `${project} ${String(num).padStart(3, "0")} ·`;
+  await page.locator(".decision-row", { hasText: where }).first().click();
+}
+
 /** Title prefix of the baseline fixture tasks created by global setup. */
 export const SEED_PREFIX = "seed: ";
 

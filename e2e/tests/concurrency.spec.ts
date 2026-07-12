@@ -8,6 +8,7 @@ import {
   PROJECT,
   STORE,
   createTaskViaAPI,
+  finishTask,
   storeIsLocal,
   uniqueDesc,
 } from "../helpers";
@@ -166,4 +167,39 @@ test("concurrent ship/unship at one feature never 500s, leaves one file, commits
       `${PROJECT}/features`,
     ]);
   }
+});
+
+test("concurrent same-base body edits keep exactly one winner -- no lost update under a race (task 115)", async ({
+  request,
+}) => {
+  // 115 is verified sequentially elsewhere; this locks it under a TRUE race.
+  // Many editors load the same body and save at once carrying the same base
+  // etag. Serialized behind the store lock, exactly one write still matches the
+  // base and wins (200); every other now sees a changed etag and gets a clean
+  // 409. A second 200 would mean a TOCTOU in the check -> a silent lost update.
+  const editors = 6;
+  const t = await createTaskViaAPI(request, uniqueDesc("edit-race"));
+  const loaded = await (await request.get(`${base}/tasks/${t.num}`)).json();
+
+  const statuses = await Promise.all(
+    Array.from({ length: editors }, (_, i) =>
+      request
+        .put(`${base}/tasks/${t.num}`, {
+          data: { body: `${loaded.body}\n\nEDITOR-${i}\n`, base: loaded.etag },
+        })
+        .then((r) => r.status())
+    )
+  );
+  expect(statuses.filter((s) => s === 200), `statuses: ${statuses}`).toHaveLength(1);
+  expect(statuses.filter((s) => s === 409)).toHaveLength(editors - 1);
+  expect(statuses.every((s) => s === 200 || s === 409)).toBe(true);
+
+  // Exactly one editor's content survived -- no interleaved or lost write.
+  const body = (await (await request.get(`${base}/tasks/${t.num}`)).json()).body;
+  const survivors = Array.from({ length: editors }, (_, i) => i).filter((i) =>
+    body.includes(`EDITOR-${i}`)
+  );
+  expect(survivors, `surviving editors: ${survivors}`).toHaveLength(1);
+
+  await finishTask(request, t.num);
 });

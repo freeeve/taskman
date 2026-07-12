@@ -85,6 +85,25 @@ test("busy projects sort above idle ones, and idle ones are dimmed", async ({ pa
   for (const n of dimOpens) expect(n).toBe(0);
 });
 
+test("typing an exact project name ranks it first, even over a busier prefix-sibling (task 102)", async ({
+  page,
+}) => {
+  // Find any name that is a strict prefix of another project (e.g. libcat vs
+  // libcat-e2e); that family exercises exact-over-activity ranking. Skip if the
+  // store has no such pair -- the assertion needs one to mean anything.
+  const names: string[] = (await (await page.request.get("/api/projects")).json()).map(
+    (p: { name: string }) => p.name
+  );
+  const target = names.find((n) => names.some((m) => m !== n && m.startsWith(`${n}-`)));
+  test.skip(!target, "no prefix-sharing project family in this store to exercise ranking");
+
+  await openPicker(page);
+  await page.locator("#picker-search").fill(target!);
+  // The exact match is the first (highlighted) row, so Enter -- which takes the
+  // top row -- selects it rather than a busier prefix-sibling.
+  await expect(page.locator("#picker-list li").first().locator("span").first()).toHaveText(target!);
+});
+
 test("arrow keys move the highlight and enter selects it", async ({ page }) => {
   await openPicker(page);
   await page.locator("#picker-search").press("ArrowDown");

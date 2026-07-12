@@ -43,11 +43,15 @@ async function mutate(fn) {
     alert(err.message || err);
   }
   await loadTasks();
-  // A mutation can start from the features view (task dialog via a chip);
-  // refresh it too so chips reflect the new status without a tab switch.
-  // typeof-guarded: featuresVisible lives in features.js, loaded after us.
+  // A mutation can start from another view's surface (a feature chip's
+  // dialog, a decisions-inbox row); refresh whichever is visible so it
+  // reflects the change without a tab switch. typeof-guarded: those flags
+  // live in scripts loaded after this one.
   if (typeof featuresVisible !== "undefined" && featuresVisible) {
     await loadFeatures();
+  }
+  if (typeof decisionsVisible !== "undefined" && decisionsVisible) {
+    await loadDecisions();
   }
 }
 
@@ -841,6 +845,9 @@ async function refreshStale() {
   }
   if (typeof activityVisible !== "undefined" && activityVisible) {
     await loadActivity().catch(showError);
+  }
+  if (typeof decisionsVisible !== "undefined" && decisionsVisible) {
+    await loadDecisions().catch(showError);
   }
   window.scrollTo(0, y);
   if (num) {

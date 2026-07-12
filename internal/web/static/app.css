@@ -552,8 +552,11 @@ main#activity {
 
 .feature-card.done { opacity: 0.6; }
 
+/* Wraps: the rollup plus four action buttons exceed 320px even with the
+   title fully collapsed, so narrow screens drop them to a second line. */
 .feature-head {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
   gap: 8px;

@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  BASE_URL,
   PROJECT,
   card,
   commitsSince,
@@ -212,6 +213,28 @@ test("show all done toggles the done column between the cap and every card (task
   await toggle.click();
   await expect(cards).toHaveCount(DONE_CAP);
   await expect(toggle).toHaveText("show all done");
+});
+
+test("PUT order drops nonexistent task numbers and dedupes (task 110)", async ({ request }) => {
+  const a = await createTaskViaAPI(request, uniqueDesc("order-a"));
+  const b = await createTaskViaAPI(request, uniqueDesc("order-b"));
+  // Include the current order so the seeds survive; add a bogus number and a
+  // duplicate up front to exercise the validation.
+  const { order: before } = await getTasks(request);
+  const res = await request.put(`${BASE_URL}/api/projects/${PROJECT}/order`, {
+    data: { order: [a.num, 999999, b.num, a.num, ...before] },
+  });
+  expect(res.status()).toBe(204);
+
+  const { order } = await getTasks(request);
+  expect(order, "a nonexistent number is dropped").not.toContain(999999);
+  expect(order.filter((n) => n === a.num), "duplicates collapse").toHaveLength(1);
+  // Valid numbers keep the given relative sequence (a before b).
+  expect(order.indexOf(a.num)).toBeLessThan(order.indexOf(b.num));
+
+  // Finishing drops them from order, restoring the seed order.
+  await finishTask(request, a.num);
+  await finishTask(request, b.num);
 });
 
 test("the board refetches on focus, surfacing an out-of-band task without a reload", async ({

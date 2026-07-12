@@ -73,6 +73,12 @@ func (t Task) SetLane(lane string) (Task, error) {
 	if t.Lane == lane {
 		return t, fmt.Errorf("%s already has lane %q", t.File, lane)
 	}
+	if err := CheckLane(lane); err != nil {
+		return t, err
+	}
+	if err := checkName(t.Num, lane, t.Slug); err != nil {
+		return t, err
+	}
 	nt := t
 	nt.Lane = lane
 	nt.File = nt.Name()
@@ -131,6 +137,9 @@ func (t Task) Retitle(desc string) (Task, error) {
 	}
 	slug := Slugify(desc)
 	if err := CheckSlug(slug); err != nil {
+		return t, err
+	}
+	if err := checkName(t.Num, t.Lane, slug); err != nil {
 		return t, err
 	}
 	siblings, err := Load(t.Dir)
@@ -252,6 +261,37 @@ func CheckSlug(slug string) error {
 	return nil
 }
 
+// MaxLaneLen bounds a lane token: lanes are short routing labels, and the
+// cap keeps the failure a clean validation error instead of a filesystem
+// name-length error at rename time.
+const MaxLaneLen = 40
+
+// CheckLane rejects lane tokens that cannot become part of a filename. An
+// empty lane is fine here -- it means "no lane"; callers that require a
+// token check that separately.
+func CheckLane(lane string) error {
+	if len(lane) > MaxLaneLen {
+		return fmt.Errorf("lane too long: %d bytes (max %d)", len(lane), MaxLaneLen)
+	}
+	return nil
+}
+
+// checkName rejects a create or rename whose worst-case basename -- number,
+// lane, slug, both status suffixes, extension -- would exceed the common
+// 255-byte filename limit. Per-field caps alone cannot guarantee this (a
+// near-cap slug plus a lane can overflow the total), and every later status
+// rename must also fit, hence the worst-case suffix.
+func checkName(num int, lane, slug string) error {
+	n := len(fmt.Sprintf("%03d", num)) + 1 + len(slug) + len(".in-progress.deferred.md")
+	if lane != "" {
+		n += 1 + len(lane)
+	}
+	if n > 255 {
+		return fmt.Errorf("name too long: number, lane, and slug need %d bytes (max 255); shorten the lane or the title", n)
+	}
+	return nil
+}
+
 // New creates the next numbered pending task in dir with the standard body,
 // returning it. The lane must already be slugified (or empty); desc keeps
 // its human form in the title. A slug already in use is refused (matching
@@ -260,6 +300,12 @@ func CheckSlug(slug string) error {
 func New(dir string, tasks []Task, desc, lane, date string) (Task, error) {
 	slug := Slugify(desc)
 	if err := CheckSlug(slug); err != nil {
+		return Task{}, err
+	}
+	if err := CheckLane(lane); err != nil {
+		return Task{}, err
+	}
+	if err := checkName(NextNum(tasks), lane, slug); err != nil {
 		return Task{}, err
 	}
 	for _, other := range tasks {

@@ -956,6 +956,22 @@ func TestSetLaneAPI(t *testing.T) {
 		map[string]string{"lane": "!!!"}, nil); code != 400 {
 		t.Errorf("junk lane status %d", code)
 	}
+	// An over-long lane 400s with a clean validation message -- no raw
+	// ENAMETOOLONG, no leaked filenames -- and the task keeps its file
+	// (task 117).
+	var laneErr struct {
+		Error string `json:"error"`
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/lane",
+		map[string]string{"lane": strings.Repeat("x", 250)}, &laneErr); code != 400 ||
+		!strings.Contains(laneErr.Error, "lane too long") ||
+		strings.Contains(laneErr.Error, "file name too long") ||
+		strings.Contains(laneErr.Error, ".md") {
+		t.Errorf("over-long lane: code %d err %q", code, laneErr.Error)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002_build-board.md")); err != nil {
+		t.Errorf("rejected lane must leave the file untouched: %v", err)
+	}
 	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/99/lane",
 		map[string]string{"lane": "qa"}, nil); code != 404 {
 		t.Errorf("unknown task status %d", code)

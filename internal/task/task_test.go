@@ -459,6 +459,71 @@ func TestCheckSlug(t *testing.T) {
 	}
 }
 
+// TestCheckLane pins lane length validation: over-long lanes and combined
+// number+lane+slug overflows must fail with a clean message before the
+// filesystem gets to reject the rename (task 117).
+func TestCheckLane(t *testing.T) {
+	if err := CheckLane(""); err != nil {
+		t.Errorf("empty lane must pass (means no lane): %v", err)
+	}
+	if err := CheckLane(strings.Repeat("a", MaxLaneLen)); err != nil {
+		t.Errorf("lane at the limit must pass: %v", err)
+	}
+	if err := CheckLane(strings.Repeat("a", MaxLaneLen+1)); err == nil ||
+		!strings.Contains(err.Error(), "lane too long") {
+		t.Errorf("over-long lane error = %v", err)
+	}
+
+	dir := ledger(t)
+	// SetLane rejects an over-long lane cleanly, keeping the old file.
+	created, err := New(dir, nil, "lane cap probe", "", "2026-07-12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := created.SetLane(strings.Repeat("x", 250)); err == nil ||
+		!strings.Contains(err.Error(), "lane too long") ||
+		strings.Contains(err.Error(), "file name too long") {
+		t.Errorf("SetLane over-long = %v (must be clean validation)", err)
+	}
+	if _, err := os.Stat(created.Path()); err != nil {
+		t.Errorf("rejected SetLane must leave the file untouched: %v", err)
+	}
+	// New with an over-long lane is refused before any file is created.
+	if _, err := New(dir, []Task{created}, "another probe",
+		strings.Repeat("y", MaxLaneLen+1), "2026-07-12"); err == nil ||
+		!strings.Contains(err.Error(), "lane too long") {
+		t.Errorf("New over-long lane = %v", err)
+	}
+
+	// Per-field caps can still overflow the 255-byte basename in
+	// combination: a near-cap slug plus an in-limit lane must be caught by
+	// the combined check on every entry point.
+	longDesc := strings.Repeat("z", MaxSlugLen)
+	maxLane := strings.Repeat("l", MaxLaneLen)
+	if _, err := New(dir, []Task{created}, longDesc, maxLane, "2026-07-12"); err == nil ||
+		!strings.Contains(err.Error(), "name too long") {
+		t.Errorf("New combined overflow = %v", err)
+	}
+	longSlugged, err := New(dir, []Task{created}, longDesc, "", "2026-07-12")
+	if err != nil {
+		t.Fatalf("cap-length slug without a lane must fit: %v", err)
+	}
+	if _, err := longSlugged.SetLane(maxLane); err == nil ||
+		!strings.Contains(err.Error(), "name too long") {
+		t.Errorf("SetLane combined overflow = %v", err)
+	}
+	// And the mirror image: retitling to a near-cap slug under an existing
+	// lane is refused before the rename.
+	laned, err := New(dir, []Task{created, longSlugged}, "short but routed", maxLane, "2026-07-12")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := laned.Retitle(longDesc); err == nil ||
+		!strings.Contains(err.Error(), "name too long") {
+		t.Errorf("Retitle combined overflow = %v", err)
+	}
+}
+
 func FuzzSlugify(f *testing.F) {
 	f.Add("Full-corpus NQ export!")
 	f.Add("---")

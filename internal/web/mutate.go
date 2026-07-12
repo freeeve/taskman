@@ -272,20 +272,21 @@ func (s *server) answerDecision(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	// Only a POSED decision is answerable: deferred plus a live block. A
-	// non-deferred body carrying a block is documentation of the format,
-	// and answering would corrupt it.
+	// Only a POSED decision is answerable: deferred plus a live block. The
+	// already-answered case stays a 409 whatever the status (a stale writer
+	// racing the winner); a non-deferred body carrying a live block is
+	// documentation of the format, and answering would corrupt it.
+	d, live := task.ParseDecision(string(body))
+	if !live && task.HasAnsweredDecision(string(body)) {
+		writeErr(w, http.StatusConflict, fmt.Errorf("this decision was already answered"))
+		return
+	}
 	if !t.Deferred {
 		writeErr(w, http.StatusBadRequest,
 			fmt.Errorf("this task is not deferred; nothing awaits an answer"))
 		return
 	}
-	d, live := task.ParseDecision(string(body))
 	if !live {
-		if task.HasAnsweredDecision(string(body)) {
-			writeErr(w, http.StatusConflict, fmt.Errorf("this decision was already answered"))
-			return
-		}
 		writeErr(w, http.StatusBadRequest, fmt.Errorf("this task has no unanswered decision"))
 		return
 	}

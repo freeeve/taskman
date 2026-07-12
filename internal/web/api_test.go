@@ -1161,18 +1161,23 @@ func TestDecisionAPI(t *testing.T) {
 		t.Errorf("no-decision answer status %d", code)
 	}
 
-	// Free-text Other records the note.
+	// Free-text Other records the note (on a genuinely deferred task -- a
+	// non-deferred one is unanswerable by design).
 	block2 := "\n```decision\nquestion: Name it?\noptions:\n- label: alpha\n- label: beta\n```\n"
-	p2 := filepath.Join(dir, "002_build-board.md")
+	p2 := filepath.Join(dir, "003-impl_wire-api.in-progress.md")
 	b2, _ := os.ReadFile(p2)
-	if err := os.WriteFile(p2, append(b2, []byte(block2)...), 0o644); err != nil {
+	p2deferred := filepath.Join(dir, "003-impl_wire-api.in-progress.deferred.md")
+	if err := os.WriteFile(p2deferred, append(b2, []byte(block2)...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/answer",
+	if err := os.Remove(p2); err != nil {
+		t.Fatal(err)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/3/answer",
 		map[string]string{"other": "call it gamma"}, nil); code != 200 {
 		t.Fatalf("other answer failed")
 	}
-	after, _ = os.ReadFile(p2)
+	after, _ = os.ReadFile(filepath.Join(dir, "003-impl_wire-api.in-progress.md"))
 	if !strings.Contains(string(after), "chosen: Other") ||
 		!strings.Contains(string(after), "note: call it gamma") {
 		t.Errorf("other record:\n%s", after)

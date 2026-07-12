@@ -132,3 +132,33 @@ test("an in-limit lane whose combined basename would exceed the filename limit i
 
   await finishTask(request, t.num);
 });
+
+test("the board lane filter resets when its selected lane no longer exists (no stranded filter)", async ({
+  page,
+}) => {
+  // State-desync guard: if the filter holds a lane that then vanishes (its last
+  // task's lane cleared), the dropdown rebuild must drop it and fall back to
+  // "all lanes" -- not keep filtering by a lane no card has, which would strand
+  // the board empty.
+  const laneTok = `zzlane${Date.now()}`;
+  const t = await createTaskViaAPI(page.request, uniqueDesc("lane-vanish"));
+  await page.request.post(`${base}/tasks/${t.num}/lane`, { data: { lane: laneTok } });
+
+  await gotoBoard(page);
+  await page.locator("#lane").selectOption(laneTok);
+  await expect(card(page, t.num)).toBeVisible();
+
+  // The lane now belongs to no task; a refetch must rebuild the dropdown without
+  // it and reset the stale selection.
+  await page.request.post(`${base}/tasks/${t.num}/lane`, { data: { lane: "" } });
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/tasks`)),
+    page.evaluate(() => window.dispatchEvent(new Event("focus"))),
+  ]);
+  await expect(page.locator("#lane")).toHaveValue("");
+  await expect(page.locator(`#lane option[value="${laneTok}"]`)).toHaveCount(0);
+  // The task (now laneless) is visible again -- the board is not stranded.
+  await expect(card(page, t.num)).toBeVisible();
+
+  await finishTask(page.request, t.num);
+});

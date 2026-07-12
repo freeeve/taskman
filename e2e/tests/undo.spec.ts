@@ -74,6 +74,37 @@ test("undo 409s when the project moved since the peek", async ({ request }) => {
   await finishTask(request, t2.num);
 });
 
+test("the undo chain keeps working past a redo: undo, redo, then undo again all succeed (task 116)", async ({
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("undo-chain"));
+  const present = async () => (await request.get(`${base}/tasks/${t.num}`)).status();
+  const peekStatus = async () => (await request.get(`${base}/undo`)).status();
+  const undo = async () => (await request.post(`${base}/undo`, { data: {} })).status();
+
+  expect(await present()).toBe(200);
+
+  // Undo 1: revert the create -> task gone. The revert is itself a taskman
+  // mutation, so the target stays peekable.
+  expect(await undo()).toBe(200);
+  expect(await present()).toBe(404);
+  expect(await peekStatus(), "peek stays available after the first undo").toBe(200);
+
+  // Undo 2 (redo): revert the revert -> task back. git spells this
+  // `Reapply "chore(...)"` (or older `Revert "Revert "chore(...""`), which 116
+  // taught undoable() to accept by unwrapping to the innermost chore(<p>):.
+  expect(await undo()).toBe(200);
+  expect(await present()).toBe(200);
+  expect(await peekStatus(), "the reapply commit must still be undoable, not a 409").toBe(200);
+
+  // Undo 3: the step that regressed before 116 -- the peek 409'd ("not a
+  // taskman mutation") and the button jammed. It must now revert the reapply.
+  expect(await undo()).toBe(200);
+  expect(await present()).toBe(404);
+  expect(await peekStatus()).toBe(200);
+  // Task ends reverted-away: no file lingers, nothing to finish.
+});
+
 test("undo of a title edit restores the original slug without orphaning a file", async ({
   request,
 }) => {

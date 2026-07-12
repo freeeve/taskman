@@ -272,6 +272,14 @@ func (s *server) answerDecision(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
+	// Only a POSED decision is answerable: deferred plus a live block. A
+	// non-deferred body carrying a block is documentation of the format,
+	// and answering would corrupt it.
+	if !t.Deferred {
+		writeErr(w, http.StatusBadRequest,
+			fmt.Errorf("this task is not deferred; nothing awaits an answer"))
+		return
+	}
 	d, live := task.ParseDecision(string(body))
 	if !live {
 		if task.HasAnsweredDecision(string(body)) {
@@ -309,12 +317,10 @@ func (s *server) answerDecision(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	nt := t
-	if t.Deferred {
-		if nt, err = t.Resume(today()); err != nil {
-			writeErr(w, http.StatusInternalServerError, err)
-			return
-		}
+	nt, err := t.Resume(today())
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
 	}
 	op, err := store.PromoteToTop(projDir, nt.Num)
 	if err != nil {

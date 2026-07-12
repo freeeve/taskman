@@ -982,6 +982,57 @@ func TestDecisionsLists(t *testing.T) {
 	}
 }
 
+// TestDecisionRequiresDeferred pins the single definition of "live": a
+// non-deferred task whose body merely documents the block format (a spec)
+// shows no badge, no widget, and cannot be answered into corruption.
+func TestDecisionRequiresDeferred(t *testing.T) {
+	home, srv := testStore(t)
+	block := "\n```decision\nquestion: Doc example?\noptions:\n- label: a\n- label: b\n```\n"
+	path := filepath.Join(home, "myproj", "tasks", "001_ship-it.done.md")
+	body, _ := os.ReadFile(path)
+	if err := os.WriteFile(path, append(body, []byte(block)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var list struct {
+		Tasks []struct {
+			Num         int  `json:"num"`
+			HasDecision bool `json:"has_decision"`
+		} `json:"tasks"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks", &list); code != 200 {
+		t.Fatal("list failed")
+	}
+	for _, tk := range list.Tasks {
+		if tk.Num == 1 && tk.HasDecision {
+			t.Error("done non-deferred doc example must not flag has_decision")
+		}
+	}
+	var detail struct {
+		Decision *struct{} `json:"decision"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/1", &detail); code != 200 {
+		t.Fatal("detail failed")
+	}
+	if detail.Decision != nil {
+		t.Error("doc example must not surface an answer widget")
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/1/answer",
+		map[string]string{"choice": "a"}, nil); code != 400 {
+		t.Errorf("answering a doc example = %d, want 400", code)
+	}
+	after, _ := os.ReadFile(path)
+	if !strings.Contains(string(after), "```decision\n") ||
+		strings.Contains(string(after), "decision answered") {
+		t.Errorf("spec body must be untouched:\n%s", after)
+	}
+	// The inbox agrees (it always required deferred).
+	var rows []struct{}
+	if code := get(t, srv, "/api/projects/myproj/decisions", &rows); code != 200 || len(rows) != 0 {
+		t.Errorf("inbox rows = %d, want 0", len(rows))
+	}
+}
+
 // TestDecisionAPI drives the structured-question flow over HTTP: the flag
 // and parsed payload surface, plain resume refuses, answering validates,
 // records, un-defers, promotes to top-of-order, and stale answers 409.

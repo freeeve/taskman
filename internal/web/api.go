@@ -209,7 +209,12 @@ func toJSON(t task.Task) taskJSON {
 	}
 	if data, err := os.ReadFile(t.Path()); err == nil {
 		out.Title = title(string(data), t.Slug)
-		_, out.HasDecision = task.ParseDecision(string(data))
+		// A live decision means POSED, not merely present: deferred plus an
+		// unanswered block, the same rule the inbox uses. A body that only
+		// documents the block format (a spec) must not light the badge.
+		if t.Deferred {
+			_, out.HasDecision = task.ParseDecision(string(data))
+		}
 	}
 	return out
 }
@@ -426,7 +431,7 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var dj *decisionJSON
-	if d, live := task.ParseDecision(string(body)); live {
+	if d, live := task.ParseDecision(string(body)); live && t.Deferred {
 		dj = toDecisionJSON(d)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -2,6 +2,8 @@ package web
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -436,6 +438,7 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"task": toJSON(t), "body": string(body), "html": rendered, "decision": dj,
+		"etag": bodyEtag(body),
 	})
 }
 
@@ -454,6 +457,14 @@ func rewriteLinks(html string) string {
 	const attrs = `<a target="_blank" rel="noopener noreferrer" href="`
 	html = strings.ReplaceAll(html, `<a href="http://`, attrs+`http://`)
 	return strings.ReplaceAll(html, `<a href="https://`, attrs+`https://`)
+}
+
+// bodyEtag fingerprints a body for optimistic concurrency: editors
+// round-trip it and a mismatched save 409s instead of silently clobbering a
+// concurrent edit.
+func bodyEtag(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:8])
 }
 
 // renderBody converts markdown to html with the store-specific rewrites
@@ -491,7 +502,7 @@ func (s *server) featureDetail(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"slug": f.Slug, "done": f.Done, "title": f.Title, "file": f.File,
-		"body": string(body), "html": rendered,
+		"body": string(body), "html": rendered, "etag": bodyEtag(body),
 	})
 }
 

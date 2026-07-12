@@ -604,6 +604,7 @@ func (s *server) editTask(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Title string `json:"title"`
 		Body  string `json:"body"`
+		Base  string `json:"base"`
 	}
 	if err := readBody(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -617,6 +618,20 @@ func (s *server) editTask(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
+	}
+	// Optimistic concurrency: a save carrying the etag it loaded from must
+	// still match, or a concurrent editor's work would be silently lost.
+	if req.Base != "" {
+		cur, err := os.ReadFile(t.Path())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if bodyEtag(cur) != req.Base {
+			writeErr(w, http.StatusConflict,
+				fmt.Errorf("this task changed since you loaded it; reload and re-apply your edit"))
+			return
+		}
 	}
 	paths := []string{t.Path()}
 	if req.Body != "" {
@@ -660,6 +675,7 @@ func (s *server) editFeature(w http.ResponseWriter, r *http.Request) {
 	}
 	var req struct {
 		Body string `json:"body"`
+		Base string `json:"base"`
 	}
 	if err := readBody(r, &req); err != nil {
 		writeErr(w, http.StatusBadRequest, err)
@@ -673,6 +689,18 @@ func (s *server) editFeature(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
+	}
+	if req.Base != "" {
+		cur, err := os.ReadFile(f.Path())
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, err)
+			return
+		}
+		if bodyEtag(cur) != req.Base {
+			writeErr(w, http.StatusConflict,
+				fmt.Errorf("this feature changed since you loaded it; reload and re-apply your edit"))
+			return
+		}
 	}
 	body := strings.TrimRight(req.Body, "\n") + "\n"
 	if err := os.WriteFile(f.Path(), []byte(body), 0o644); err != nil {

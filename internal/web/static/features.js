@@ -319,10 +319,13 @@ async function editFeatureSpec(f) {
       await api(`/api/projects/${state.project}/features/${f.slug}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ body: ta.value }),
+        body: JSON.stringify({ body: ta.value, base: detail.etag }),
       });
     } catch (err) {
+      // Stay in the editor so a conflict (409) or any other failure never
+      // discards what the user typed; cancel closes without saving.
       alert(err.message || err);
+      return;
     }
     $("#task-dialog").close();
     await loadFeatures().catch(showError);

@@ -1376,6 +1376,92 @@ func TestEditTask(t *testing.T) {
 	}
 }
 
+// TestEditConflict pins optimistic concurrency for body edits: a save
+// carrying the etag it loaded must still match on the server or it 409s
+// instead of silently clobbering a concurrent editor's save, for both task
+// and feature bodies. Base-less PUTs keep the old last-write-wins contract.
+func TestEditConflict(t *testing.T) {
+	home, srv := testStore(t)
+
+	// Both "editors" load the same task base.
+	var detail struct {
+		Body string `json:"body"`
+		Etag string `json:"etag"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/2", &detail); code != 200 || detail.Etag == "" {
+		t.Fatalf("detail: code %d etag %q", code, detail.Etag)
+	}
+
+	// Editor A saves from the loaded base: accepted.
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2",
+		map[string]string{"body": detail.Body + "\nEditor A's paragraph.\n", "base": detail.Etag},
+		nil); code != 200 {
+		t.Fatalf("fresh-base edit status %d", code)
+	}
+	// Editor B saves from the same, now-stale base: conflict, nothing written.
+	var conflict struct {
+		Error string `json:"error"`
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2",
+		map[string]string{"body": detail.Body + "\nEditor B's paragraph.\n", "base": detail.Etag},
+		&conflict); code != 409 || !strings.Contains(conflict.Error, "changed since") {
+		t.Fatalf("stale-base edit: code %d err %q", code, conflict.Error)
+	}
+	var after struct {
+		Body string `json:"body"`
+		Etag string `json:"etag"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/tasks/2", &after); code != 200 {
+		t.Fatal("detail after conflict failed")
+	}
+	if !strings.Contains(after.Body, "Editor A's paragraph") ||
+		strings.Contains(after.Body, "Editor B's paragraph") {
+		t.Errorf("editor A's save must survive the conflict:\n%s", after.Body)
+	}
+	// Editor B reloads and saves from the fresh etag: accepted.
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2",
+		map[string]string{"body": after.Body + "\nEditor B rebased.\n", "base": after.Etag},
+		nil); code != 200 {
+		t.Errorf("reloaded-base edit status %d", code)
+	}
+	// A PUT without a base stays last-write-wins for existing consumers.
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2",
+		map[string]string{"body": "# 002 -- Build the board\n\nBase-less overwrite.\n"},
+		nil); code != 200 {
+		t.Errorf("base-less edit status %d", code)
+	}
+
+	// Feature bodies get the same guard.
+	var feat struct {
+		Body string `json:"body"`
+		Etag string `json:"etag"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/features/kanban", &feat); code != 200 || feat.Etag == "" {
+		t.Fatalf("feature detail: code %d etag %q", code, feat.Etag)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/kanban",
+		map[string]string{"body": feat.Body + "\nSpec addition A.\n", "base": feat.Etag},
+		nil); code != 200 {
+		t.Fatalf("fresh-base feature edit status %d", code)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/features/kanban",
+		map[string]string{"body": feat.Body + "\nSpec addition B.\n", "base": feat.Etag},
+		&conflict); code != 409 || !strings.Contains(conflict.Error, "changed since") {
+		t.Fatalf("stale-base feature edit: code %d err %q", code, conflict.Error)
+	}
+	var featAfter struct {
+		Body string `json:"body"`
+	}
+	if code := get(t, srv, "/api/projects/myproj/features/kanban", &featAfter); code != 200 ||
+		!strings.Contains(featAfter.Body, "Spec addition A") ||
+		strings.Contains(featAfter.Body, "Spec addition B") {
+		t.Errorf("feature editor A's save must survive: %+v", featAfter)
+	}
+	if status := lastPorcelain(t, home); status != "" {
+		t.Errorf("tree dirty after conflict flow:\n%s", status)
+	}
+}
+
 // TestActivity pins the audit-trail view: newest-first project-scoped
 // commits with stripped summaries and commit-metadata timestamps; other
 // projects' commits do not bleed in.

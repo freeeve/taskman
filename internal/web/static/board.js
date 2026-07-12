@@ -599,7 +599,7 @@ function renderEditor(data) {
   const save = document.createElement("button");
   save.textContent = "save";
   save.addEventListener("click", async () => {
-    const payload = { body: ta.value };
+    const payload = { body: ta.value, base: data.etag };
     const title = titleInput.value.trim();
     if (title && title !== data.task.title) payload.title = title;
     try {
@@ -609,7 +609,10 @@ function renderEditor(data) {
         body: JSON.stringify(payload),
       });
     } catch (err) {
+      // Stay in the editor so a conflict (409) or any other failure never
+      // discards what the user typed; cancel reloads the fresh version.
       alert(err.message || err);
+      return;
     }
     await loadTasks().catch(showError);
     await openTask(data.task.num).catch((err) => alert(err.message || err));

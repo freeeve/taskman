@@ -4,9 +4,11 @@ import {
   PROJECT,
   commitsSince,
   createTaskViaAPI,
+  decisionPoseSupported,
   finishTask,
   gotoBoard,
   headCommit,
+  poseDecision,
   storeIsLocal,
   uniqueDesc,
 } from "../helpers";
@@ -97,5 +99,45 @@ test("undo of a title edit restores the original slug without orphaning a file",
   expect(matches).toHaveLength(1);
   expect(matches[0].slug).toBe(origSlug);
 
+  await finishTask(request, t.num);
+});
+
+test("undo of a decision answer restores the deferral, the question, and the priority in one revert", async ({
+  request,
+}) => {
+  test.skip(!decisionPoseSupported(), "taskman binary cannot pose decisions (stale CLI)");
+  // Answering a decision is the widest single mutation: it rewrites the task
+  // body (answered block), lifts the deferral (a file rename), and promotes the
+  // task to the top of order -- all in one commit. A single revert must undo
+  // all three, or the ledger is left half-answered.
+  const t = await createTaskViaAPI(request, uniqueDesc("undo-answer"));
+  poseDecision(t.num, "Inline or queue?", ["Inline::a", "Queue::b"]);
+
+  const before = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(before.deferred).toBe(true);
+  expect(before.has_decision).toBe(true);
+
+  expect((await request.post(`${base}/tasks/${t.num}/answer`, { data: { choice: "Inline" } })).ok()).toBeTruthy();
+  const answered = await (await request.get(`${base}/tasks`)).json();
+  expect(answered.tasks.find((x: { num: number }) => x.num === t.num).deferred).toBe(false);
+  expect(answered.order[0]).toBe(t.num); // promoted to the top
+
+  // Undo the answer.
+  const peek = await (await request.get(`${base}/undo`)).json();
+  expect(peek.subject).toContain("answer decision");
+  expect((await request.post(`${base}/undo`, { data: { commit: peek.commit } })).ok()).toBeTruthy();
+
+  // All three effects reverted together: deferred again, question live again,
+  // and no longer at the top of order.
+  const after = await (await request.get(`${base}/tasks`)).json();
+  const t2 = after.tasks.find((x: { num: number }) => x.num === t.num);
+  expect(t2.deferred).toBe(true);
+  expect(t2.has_decision).toBe(true);
+  expect(after.order[0]).not.toBe(t.num);
+
+  // Clean up: answer for real, then finish.
+  await request.post(`${base}/tasks/${t.num}/answer`, { data: { choice: "Inline" } });
   await finishTask(request, t.num);
 });

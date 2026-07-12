@@ -8,9 +8,11 @@ import {
   appendFeatureBody,
   commitStore,
   createTaskViaAPI,
+  decisionPoseSupported,
   finishTask,
   gotoBoard,
   linkTasksToFeature,
+  poseDecision,
   storeIsLocal,
   uniqueDesc,
 } from "../helpers";
@@ -73,6 +75,44 @@ test("neither tab overflows horizontally and all header controls stay on-screen"
       ).toEqual([]);
     }
   }
+});
+
+test("the decisions banner wraps within narrow viewports instead of scrolling the page (task 105)", async ({
+  page,
+  request,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  test.skip(!decisionPoseSupported(), "taskman binary cannot pose decisions (stale CLI)");
+
+  // A cross-project decision makes the banner -- a full-width strip carrying a
+  // long single line -- visible over the columns. Its text must wrap, never
+  // scroll the page sideways, which is the recurring narrow-width overflow
+  // class (tasks 057, 103) applied to newly added chrome.
+  const t = await createTaskViaAPI(request, uniqueDesc("resp-banner"));
+  poseDecision(t.num, "Fits narrow?", ["Yes::a", "No::b"]);
+  await gotoBoard(page);
+  const banner = page.locator("#decisions-banner");
+  await expect(banner).toBeVisible();
+
+  for (const view of ["tasks", "features"] as const) {
+    await page.locator(`#tab-${view}`).click();
+    for (const width of NARROW) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect(banner).toBeVisible();
+      expect(await hasHorizontalOverflow(page), `${view} @${width}: page overflow`).toBe(false);
+      const contained = await banner.evaluate(
+        (el) =>
+          el.getBoundingClientRect().right <= window.innerWidth + 1 &&
+          el.scrollWidth <= el.clientWidth + 1
+      );
+      expect(contained, `${view} @${width}: banner overflows its box or the viewport`).toBe(true);
+    }
+  }
+
+  await request.post(`${BASE_URL}/api/projects/${PROJECT}/tasks/${t.num}/answer`, {
+    data: { choice: "Yes" },
+  });
+  await finishTask(request, t.num);
 });
 
 test("a feature with a long unbreakable-word title stays within narrow viewports", async ({

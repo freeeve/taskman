@@ -453,3 +453,16 @@ test("a spec renders GFM tables and strikethrough", async ({ request }) => {
   // 093 lets specs clean up after themselves instead of accumulating.
   expect((await request.delete(`${base}/features/${slug}`)).status()).toBe(204);
 });
+
+test("creating a task against a bogus feature 404s and leaves no orphan task", async ({ request }) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  // The handler resolves the feature before minting a number, so a bad slug
+  // must not leave an unlinked task behind.
+  const before = (await (await request.get(`${base}/tasks`)).json()).tasks.length;
+  const res = await request.post(`${base}/tasks`, {
+    data: { description: uniqueDesc("orphan"), feature: "no-such-feature-zzz" },
+  });
+  expect(res.status()).toBe(404);
+  const after = (await (await request.get(`${base}/tasks`)).json()).tasks.length;
+  expect(after).toBe(before);
+});

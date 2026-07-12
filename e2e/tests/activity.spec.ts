@@ -1,5 +1,13 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, PROJECT, gotoBoard, storeIsLocal, uniqueDesc } from "../helpers";
+import {
+  BASE_URL,
+  PROJECT,
+  createTaskViaAPI,
+  finishTask,
+  gotoBoard,
+  storeIsLocal,
+  uniqueDesc,
+} from "../helpers";
 
 /**
  * Activity view (task 079): a read-only audit trail of the project's commits
@@ -71,6 +79,38 @@ test("the activity API lists mutations newest-first with the project prefix stri
   expect(eB.subject).toContain(`chore(${PROJECT}): feature ${slugB}`);
   expect(eB.commit).toMatch(/^[0-9a-f]{7,40}$/);
   expect(eB.time).toBeTruthy();
+});
+
+test("HTML in a defer reason is shown as literal text in the activity feed, not injected", async ({
+  page,
+  request,
+}) => {
+  // A defer reason is raw user text that rides into the commit subject and thus
+  // the activity summary (unlike slugs, which are sanitized). The feed renders
+  // summaries via textContent, so markup must appear verbatim and never inject
+  // -- a future switch to innerHTML would silently reintroduce stored XSS.
+  const t = await createTaskViaAPI(request, uniqueDesc("activity-xss"));
+  const payload = `<img src=x onerror="window.__pwned=1"> <b>bold</b>`;
+  const deferred = await request.post(`${base}/tasks/${t.num}/defer`, { data: { reason: payload } });
+  expect(deferred.status()).toBe(200);
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/activity")),
+    page.locator("#tab-activity").click(),
+  ]);
+
+  // Scope to this task's unique slug -- the append-only log may hold other
+  // defer rows (earlier runs, retries) carrying the same payload text.
+  const row = page.locator("#activity .activity-row", { hasText: t.slug });
+  await expect(row.locator(".activity-summary").first()).toContainText(payload);
+  // No element from the payload materialized inside the feed.
+  await expect(page.locator("#activity img")).toHaveCount(0);
+  await expect(page.locator("#activity b")).toHaveCount(0);
+  expect(await page.evaluate(() => (window as unknown as { __pwned?: number }).__pwned)).toBeUndefined();
+
+  await request.post(`${base}/tasks/${t.num}/resume`, { data: {} });
+  await finishTask(request, t.num);
 });
 
 test("the activity view refreshes on focus, surfacing an out-of-band mutation (task 085)", async ({

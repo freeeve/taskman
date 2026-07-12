@@ -77,11 +77,15 @@ function updateProjectButton() {
   $("#project-button").textContent = p ? `${p.name} (${p.open})` : state.project || "no projects";
 }
 
+// pickerMatches ranks an exact name first (Enter takes the highlighted row,
+// and typing a full name must never land on a busier prefix-sibling), then
+// prefix matches, then the rest by activity.
 function pickerMatches(q) {
   const needle = q.trim().toLowerCase();
+  const rank = (p) => (p.name === needle ? 2 : p.name.startsWith(needle) ? 1 : 0);
   return state.projects
     .filter((p) => p.name.includes(needle))
-    .sort((a, b) => b.open - a.open || a.name.localeCompare(b.name));
+    .sort((a, b) => rank(b) - rank(a) || b.open - a.open || a.name.localeCompare(b.name));
 }
 
 function renderPicker() {

@@ -72,6 +72,40 @@ test("editing a feature body persists and re-renders, and keeps its linked-task 
   await finishTask(request, t.num);
 });
 
+test("editing a feature body prompts before a backdrop click discards it (task 101)", async ({
+  page,
+  request,
+}) => {
+  const slug = await makeFeature(request, "fedit-dirty");
+  await gotoBoard(page);
+  await page.locator("#tab-features").click();
+  const card = page.locator(`.feature-card[data-slug="${slug}"]`);
+  await card.locator("button", { hasText: "edit" }).click();
+  const ta = page.locator("#task-dialog #edit-body");
+  await expect(ta).toBeVisible();
+  const marker = `dirty-${Date.now()}`;
+  await ta.fill((await ta.inputValue()) + `\n${marker}\n`);
+
+  // A backdrop click with unsaved edits fires a discard confirm; dismissing it
+  // keeps the dialog open with the text intact.
+  let message = "";
+  page.once("dialog", (d) => {
+    message = d.message();
+    d.dismiss();
+  });
+  await page.mouse.click(5, 5);
+  expect(message).toContain("Discard");
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  expect(await ta.inputValue()).toContain(marker);
+
+  // Accepting the confirm closes and discards.
+  page.once("dialog", (d) => d.accept());
+  await page.mouse.click(5, 5);
+  await expect(page.locator("#task-dialog")).toBeHidden();
+
+  await request.delete(`${base}/features/${slug}`);
+});
+
 test("an edited feature body's raw HTML is neutralized, not rendered live", async ({ request }) => {
   const slug = await makeFeature(request, "fedit-xss");
   const body = `# spec\n\nBefore <img src=x onerror="window.__x=1"> after\n`;

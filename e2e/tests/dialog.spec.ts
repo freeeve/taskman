@@ -183,3 +183,26 @@ test("a backdrop click closes the dialog; a click inside or a drag out does not 
 
   await finishTask(page.request, t.num);
 });
+
+test("a read-only task dialog still backdrop-closes without a discard prompt (090 preserved after task 101)", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  // The unsaved-edit guard (101) must only fire while editing; a plain view
+  // has no editor fields, so light dismiss stays frictionless.
+  const t = await createTaskViaAPI(page.request, uniqueDesc("view-dismiss"));
+  await gotoBoard(page);
+  await openCard(page, t.num);
+  await expect(page.locator("#task-dialog")).toBeVisible();
+
+  let prompted = false;
+  page.on("dialog", (d) => {
+    prompted = true;
+    d.dismiss();
+  });
+  await page.mouse.click(5, 5);
+  await expect(page.locator("#task-dialog")).toBeHidden();
+  expect(prompted, "a read-only dialog must not prompt on dismiss").toBe(false);
+
+  await finishTask(page.request, t.num);
+});

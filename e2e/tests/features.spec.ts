@@ -92,6 +92,31 @@ test("creating a duplicate feature surfaces a clean already-exists error", async
   expect(messages[0]).not.toContain("/");
 });
 
+test("the + feature button surfaces a clean empty-slug error and adds no card", async ({ page }) => {
+  // A title made only of characters that drop out of the slug (punctuation,
+  // emoji, whitespace) yields an empty slug. The server refuses it with 400
+  // rather than writing a feature with an empty basename that would corrupt
+  // the map; the UI must alert cleanly and add nothing -- the sibling of the
+  // already-exists path above.
+  await gotoFeatures(page);
+  const before = await page.locator(".feature-card").count();
+
+  const messages: string[] = [];
+  page.on("dialog", async (d) => {
+    if (d.type() === "prompt") await d.accept("!!!");
+    else {
+      messages.push(d.message());
+      await d.dismiss();
+    }
+  });
+  await page.locator("#features .features-bar button", { hasText: "+ feature" }).click();
+  await expect.poll(() => messages.length).toBeGreaterThan(0);
+  expect(messages[0]).toContain("empty slug");
+  expect(messages[0], "no store path leaked").not.toContain("/");
+  // Nothing was created -- no broken card slipped into the map.
+  await expect(page.locator(".feature-card")).toHaveCount(before);
+});
+
 test("ship it marks the feature shipped and renames its file", async ({ page }) => {
   await gotoFeatures(page);
   const desc = uniqueDesc("feature-ship");

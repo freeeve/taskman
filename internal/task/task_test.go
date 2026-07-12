@@ -330,6 +330,15 @@ func TestSlugify(t *testing.T) {
 		"CamelCase123":                "camelcase123",
 		"---":                         "",
 		"":                            "",
+		// Accented Latin folds to its base instead of splitting words.
+		"café résumé naïve":  "cafe-resume-naive",
+		"Fix José's résumé":  "fix-joses-resume",
+		"Zürich pipeline":    "zurich-pipeline",
+		"Æther œuvre größe":  "aether-oeuvre-grosse",
+		"ŁÓDŹ przełącznik":   "lodz-przelacznik",
+		"don’t break":        "dont-break",
+		"日本語だけ":              "",
+		"mixed 日本語 and text": "mixed-and-text",
 	}
 	for in, want := range cases {
 		if got := Slugify(in); got != want {

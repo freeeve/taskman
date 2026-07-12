@@ -179,12 +179,47 @@ func retitleH1(path string, num int, desc string) error {
 	return os.WriteFile(path, []byte(title+"\n\n"+string(data)), 0o644)
 }
 
+// latinFold maps common accented Latin runes (post-lowercase) to their ASCII
+// base so accented words slugify whole (resume, jose, zurich) instead of
+// splitting at every accent. Deliberately a small table rather than a
+// unicode-normalization dependency; non-Latin scripts stay out of slugs.
+var latinFold = map[rune]string{
+	'à': "a", 'á': "a", 'â': "a", 'ã': "a", 'ä': "a", 'å': "a", 'ā': "a", 'ą': "a", 'ă': "a",
+	'ç': "c", 'ć': "c", 'č': "c",
+	'ď': "d", 'đ': "d", 'ð': "d",
+	'è': "e", 'é': "e", 'ê': "e", 'ë': "e", 'ē': "e", 'ę': "e", 'ě': "e",
+	'ğ': "g",
+	'ì': "i", 'í': "i", 'î': "i", 'ï': "i", 'ī': "i", 'ı': "i",
+	'ł': "l",
+	'ñ': "n", 'ń': "n", 'ň': "n",
+	'ò': "o", 'ó': "o", 'ô': "o", 'õ': "o", 'ö': "o", 'ø': "o", 'ō': "o", 'ő': "o",
+	'ř': "r",
+	'ś': "s", 'š': "s", 'ş': "s",
+	'ť': "t", 'ţ': "t", 'þ': "th",
+	'ù': "u", 'ú': "u", 'û': "u", 'ü': "u", 'ū': "u", 'ů': "u", 'ű': "u",
+	'ý': "y", 'ÿ': "y",
+	'ź': "z", 'ż': "z", 'ž': "z",
+	'æ': "ae", 'œ': "oe", 'ß': "ss",
+}
+
 // Slugify folds a description to the ledger's kebab case: lowercase
-// alphanumeric runs joined by single dashes.
+// alphanumeric runs joined by single dashes, accented Latin folded to its
+// base letter, apostrophes silent (joses, not jos-s).
 func Slugify(desc string) string {
 	var b strings.Builder
 	dash := false
 	for _, r := range strings.ToLower(desc) {
+		if r == '\'' || r == '’' {
+			continue
+		}
+		if folded, ok := latinFold[r]; ok {
+			if dash && b.Len() > 0 {
+				b.WriteByte('-')
+			}
+			b.WriteString(folded)
+			dash = false
+			continue
+		}
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
 			if dash && b.Len() > 0 {

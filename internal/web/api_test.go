@@ -362,6 +362,21 @@ func TestAPIMutations(t *testing.T) {
 		t.Errorf("reorder commit = %q", s)
 	}
 
+	// Numbers with no task are dropped at the write boundary; duplicates
+	// still collapse; valid entries keep their sequence.
+	if code := send(t, srv, "PUT", "/api/projects/myproj/order",
+		map[string][]int{"order": {3, 99999, 5, 5}}, nil); code != 204 {
+		t.Fatalf("normalizing reorder status %d", code)
+	}
+	order, _ = os.ReadFile(filepath.Join(home, "myproj", "order"))
+	if strings.Contains(string(order), "99999") || !strings.Contains(string(order), "003\n005\n") {
+		t.Errorf("order not normalized:\n%s", order)
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/order",
+		map[string][]int{"order": {5, 3}}, nil); code != 204 {
+		t.Fatalf("restore order status %d", code)
+	}
+
 	// The reorder shows up in the read API.
 	var data struct {
 		Tasks []struct {

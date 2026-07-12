@@ -409,7 +409,29 @@ func (s *server) setOrder(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusBadRequest, err)
 		return
 	}
-	path, err := store.WriteOrder(projDir, req.Order)
+	// Normalize at the write boundary: the order file is git-tracked, so
+	// numbers with no task (stale or malformed clients) must not persist as
+	// cruft. Valid entries keep their given sequence; duplicates collapse.
+	tasks, _, err := loadTasks(projDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	valid := map[int]bool{}
+	for _, tk := range tasks {
+		if tk.HasNum {
+			valid[tk.Num] = true
+		}
+	}
+	filtered := make([]int, 0, len(req.Order))
+	seen := map[int]bool{}
+	for _, n := range req.Order {
+		if valid[n] && !seen[n] {
+			seen[n] = true
+			filtered = append(filtered, n)
+		}
+	}
+	path, err := store.WriteOrder(projDir, filtered)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return

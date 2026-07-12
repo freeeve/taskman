@@ -709,6 +709,37 @@ function renderActions(t) {
   edit.addEventListener("click", () => renderEditor(state.dialogData));
   bar.append(edit);
 
+  // Lane control: the board filters, badges, and groups by lane, so the
+  // dialog can move a task between lanes too (or clear it).
+  const laneSel = document.createElement("select");
+  laneSel.id = "lane-select";
+  laneSel.title = "move this task to a lane";
+  const lanes = [...document.querySelectorAll("#lane option")]
+    .map((o) => o.value)
+    .filter(Boolean);
+  if (t.lane && !lanes.includes(t.lane)) lanes.push(t.lane);
+  laneSel.append(new Option("no lane", ""));
+  for (const l of lanes) laneSel.append(new Option("lane: " + l, l));
+  laneSel.append(new Option("new lane...", "__new__"));
+  laneSel.value = t.lane || "";
+  laneSel.addEventListener("change", () => {
+    let lane = laneSel.value;
+    if (lane === "__new__") {
+      const entered = prompt("New lane name:");
+      if (!entered || !entered.trim()) {
+        laneSel.value = t.lane || "";
+        return;
+      }
+      lane = entered.trim();
+    }
+    if ((t.lane || "") === lane) return;
+    $("#task-dialog").close();
+    mutate(() => post(`/api/projects/${state.project}/tasks/${t.num}/lane`, { lane })).then(() =>
+      focusTask(t.num)
+    );
+  });
+  bar.append(laneSel);
+
   const status = (s) => () => post(`/api/projects/${state.project}/tasks/${t.num}/status`, { status: s });
   if (t.deferred) {
     // A live decision is answered through its option buttons above, never

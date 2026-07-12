@@ -899,6 +899,54 @@ func TestWriteErrSanitizesOSErrors(t *testing.T) {
 	}
 }
 
+// TestSetLaneAPI pins the web lane mutation: set, change, and clear rename
+// the file with number/slug/status/deferral preserved, one scoped commit
+// each; same-lane 409s, junk lanes 400, unknown tasks 404.
+func TestSetLaneAPI(t *testing.T) {
+	home, srv := testStore(t)
+	dir := filepath.Join(home, "myproj", "tasks")
+
+	var out struct {
+		File string `json:"file"`
+		Lane string `json:"lane"`
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/lane",
+		map[string]string{"lane": "QA Team"}, &out); code != 200 {
+		t.Fatalf("set lane status %d", code)
+	}
+	if out.File != "002-qa-team_build-board.md" || out.Lane != "qa-team" {
+		t.Errorf("set lane = %+v (lane must slugify)", out)
+	}
+	if s := lastSubject(t, home); s != "chore(myproj): lane qa-team 002-qa-team_build-board" {
+		t.Errorf("lane commit = %q", s)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/lane",
+		map[string]string{"lane": "qa-team"}, nil); code != 409 {
+		t.Errorf("same lane status %d", code)
+	}
+	// A deferred task keeps its marker across the rename.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/4/lane",
+		map[string]string{"lane": "qa"}, &out); code != 200 || out.File != "004-qa_held.deferred.md" {
+		t.Errorf("deferred lane = %+v (code %d)", out, 0)
+	}
+	// Clear via "-" like the CLI.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/lane",
+		map[string]string{"lane": "-"}, &out); code != 200 || out.File != "002_build-board.md" {
+		t.Errorf("clear lane = %+v", out)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002_build-board.md")); err != nil {
+		t.Errorf("cleared file missing: %v", err)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/2/lane",
+		map[string]string{"lane": "!!!"}, nil); code != 400 {
+		t.Errorf("junk lane status %d", code)
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks/99/lane",
+		map[string]string{"lane": "qa"}, nil); code != 404 {
+		t.Errorf("unknown task status %d", code)
+	}
+}
+
 // TestDuplicateNumberStemOpen pins duplicate-number resilience: the bare
 // number is ambiguous (404 listing both), but the stem still opens each half
 // with a distinct slug, so an existing dup is manageable from the UI.

@@ -173,6 +173,59 @@ func (s *server) setStatus(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toJSON(nt))
 }
 
+// setLane handles POST tasks/{n}/lane: {"lane"} moves the task between
+// lanes ("" or "-" clears), preserving number, slug, status, and deferral --
+// the web twin of the lane command.
+func (s *server) setLane(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projDir, err := s.projDir(r)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	var req struct {
+		Lane string `json:"lane"`
+	}
+	if err := readBody(r, &req); err != nil {
+		writeErr(w, http.StatusBadRequest, err)
+		return
+	}
+	lane := strings.TrimSpace(req.Lane)
+	if lane == "-" {
+		lane = ""
+	}
+	if lane != "" {
+		lane = task.Slugify(lane)
+		if lane == "" {
+			writeErr(w, http.StatusBadRequest, fmt.Errorf("lane yields an empty token"))
+			return
+		}
+	}
+	t, err := findByKey(projDir, r.PathValue("n"))
+	if err != nil {
+		writeErr(w, http.StatusNotFound, err)
+		return
+	}
+	nt, err := t.SetLane(lane)
+	if err != nil {
+		code := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already has lane") {
+			code = http.StatusConflict
+		}
+		writeErr(w, code, err)
+		return
+	}
+	verb := "lane " + lane
+	if lane == "" {
+		verb = "clear lane"
+	}
+	if !s.commitOK(w, r.PathValue("p"), fmt.Sprintf("%s %s", verb, nt.Stem()), t.Path(), nt.Path()) {
+		return
+	}
+	writeJSON(w, http.StatusOK, toJSON(nt))
+}
+
 // deferTask handles POST tasks/{n}/defer: {"reason"} -> task. The reason is
 // mandatory here for the same cause as in the CLI: the filename cannot carry
 // the why.

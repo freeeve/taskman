@@ -9,9 +9,11 @@ import {
   STORE,
   appendFeatureBody,
   createTaskViaAPI,
+  finishTask,
   gotoBoard,
   linkTasksToFeature,
   storeIsLocal,
+  uniqueDesc,
 } from "../helpers";
 
 /**
@@ -232,6 +234,42 @@ test("a wide table in a feature spec scrolls in its own box, not the page", asyn
     "--",
     `${PROJECT}/features`,
   ]);
+});
+
+test("a wide code block in a task dialog scrolls in its own box, not the page", async ({ page }) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+
+  // A code block relies on `.md pre { overflow-x: auto }` (a distinct rule from
+  // the wide-table box above): white-space is `pre`, so it cannot wrap and must
+  // scroll inside its own box. Without that rule a long code line would push the
+  // page sideways. Code blocks are among the most common task-body content.
+  const t = await createTaskViaAPI(page.request, uniqueDesc("wide-code"));
+  const longLine = "const x = " + "a_very_long_identifier_".repeat(20) + ";";
+  await page.request.put(`${BASE_URL}/api/projects/${PROJECT}/tasks/${t.num}`, {
+    data: { body: "```\n" + longLine + "\n```\n" },
+  });
+
+  await page.goto(`/#/p/${PROJECT}/task/${t.num}`);
+  await expect(page.locator("#dialog-body.md pre")).toBeVisible();
+
+  for (const width of [1280, 480]) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(await hasHorizontalOverflow(page), `@${width}: page overflows horizontally`).toBe(false);
+    const box = await page.evaluate(() => {
+      const pre = document.querySelector("#dialog-body.md pre") as HTMLElement;
+      const r = pre.getBoundingClientRect();
+      return {
+        withinViewport: r.right <= window.innerWidth + 1 && r.left >= -1,
+        scrolls: pre.scrollWidth > pre.clientWidth,
+        overflowX: getComputedStyle(pre).overflowX,
+      };
+    });
+    expect(box.withinViewport, `@${width}: code box overflows viewport`).toBe(true);
+    expect(box.overflowX, `@${width}: code block is not a scroll box`).toBe("auto");
+    expect(box.scrolls, `@${width}: the long line should exceed the box`).toBe(true);
+  }
+
+  await finishTask(page.request, t.num);
 });
 
 test("a spec's long unbreakable inline content wraps and never scrolls the page", async ({

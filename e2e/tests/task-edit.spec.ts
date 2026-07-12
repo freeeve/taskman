@@ -94,3 +94,26 @@ test("an edit with neither title nor body is a clean 400", async ({ request }) =
   expect(res.status()).toBe(400);
   await finishTask(request, t.num);
 });
+
+test("retitling a task to another task's title is refused, keeping both slugs unambiguous (task 108)", async ({
+  request,
+}) => {
+  const descA = uniqueDesc("collide-a");
+  const a = await createTaskViaAPI(request, descA);
+  const b = await createTaskViaAPI(request, uniqueDesc("collide-b"));
+
+  // Retitling B to A's title would duplicate A's slug -> must be refused.
+  const res = await request.put(`${base}/tasks/${b.num}`, { data: { title: descA } });
+  expect(res.status()).toBe(409);
+
+  // Both tasks keep their own slug, and A still resolves by slug.
+  const tasks = (await (await request.get(`${base}/tasks`)).json()).tasks;
+  expect(tasks.find((t: { num: number }) => t.num === a.num).slug).toBe(a.slug);
+  expect(tasks.find((t: { num: number }) => t.num === b.num).slug).toBe(b.slug);
+  const lookup = await request.get(`${base}/tasks/${a.slug}`);
+  expect(lookup.ok()).toBeTruthy();
+  expect((await lookup.json()).task.num).toBe(a.num);
+
+  await finishTask(request, a.num);
+  await finishTask(request, b.num);
+});

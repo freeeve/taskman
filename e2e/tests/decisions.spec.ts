@@ -109,6 +109,38 @@ test("answering an option in the dialog un-defers the task and promotes it to th
   await finishTask(request, t.num);
 });
 
+test("a non-deferred task whose body merely documents a decision block is not flagged (task 107)", async ({
+  page,
+  request,
+}) => {
+  // A body can contain a valid-looking ```decision block as documentation (the
+  // 091 spec does). Without the task being deferred it is NOT a posed decision,
+  // so it must not light the badge, the widget, or the inbox -- only "deferred +
+  // block" counts, matching the inbox.
+  const t = await createTaskViaAPI(request, uniqueDesc("dec-docexample"));
+  const body =
+    "# doc\n\nHere is the format:\n\n" +
+    "```decision\nquestion: Documented example?\noptions:\n  - label: A\n    explain: x\n  - label: B\n    explain: y\n```\n";
+  expect((await request.put(`${base}/tasks/${t.num}`, { data: { body } })).ok()).toBeTruthy();
+
+  // Not flagged in the list, not in the inbox.
+  const listed = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(listed.deferred).toBe(false);
+  expect(listed.has_decision).toBe(false);
+  const inbox = await (await request.get(`${BASE_URL}/api/decisions`)).json();
+  expect(inbox.some((r: { num: number }) => r.num === t.num)).toBe(false);
+
+  // Opening it shows no answer widget.
+  await gotoBoard(page);
+  await page.locator(`[data-num="${t.num}"]`).click();
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect(page.locator(".decision-box")).toHaveCount(0);
+
+  await finishTask(request, t.num);
+});
+
 test("the dialog shows the decision as its widget, not a raw fenced code block (task 104)", async ({
   page,
   request,

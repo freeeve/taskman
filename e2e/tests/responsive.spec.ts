@@ -142,6 +142,41 @@ test("a feature with a long unbreakable-word title stays within narrow viewports
   ]);
 });
 
+test("a feature with a wide multi-digit rollup does not overflow at narrow widths (task 103)", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  // The head overflow scaled with the rollup's digit count (2px at 0/1, 17px
+  // at 0/300); the long-title test above only exercises a 1-digit rollup, so
+  // pin the wide 3-digit case that spilled .feature-head before it wrapped.
+  const res = await page.request.post(`${BASE_URL}/api/projects/${PROJECT}/features`, {
+    data: { description: `e2e wide-rollup ${Date.now()}` },
+  });
+  expect(res.status()).toBe(201);
+  const slug = (await res.json()).slug as string;
+  // 150 task refs -> a 3-digit "0/150 tasks done" rollup (refs may be missing;
+  // the denominator counts them all, which is what widened the head row).
+  linkTasksToFeature(slug, Array.from({ length: 150 }, (_, i) => i + 1));
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/api/projects/${PROJECT}/features`)),
+    page.locator("#tab-features").click(),
+  ]);
+  const cardSel = `.feature-card[data-slug="${slug}"]`;
+  await expect(page.locator(`${cardSel} .rollup`)).toContainText("0/150");
+
+  for (const width of NARROW) {
+    await page.setViewportSize({ width, height: 900 });
+    expect(
+      await hasHorizontalOverflow(page),
+      `@${width}: horizontal overflow with a 3-digit rollup`
+    ).toBe(false);
+  }
+
+  await page.request.delete(`${BASE_URL}/api/projects/${PROJECT}/features/${slug}`);
+});
+
 test("a wide table in a feature spec scrolls in its own box, not the page", async ({ page }) => {
   test.skip(!storeIsLocal(), "store is not local to the test runner");
 

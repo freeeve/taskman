@@ -109,6 +109,26 @@ test("answering an option in the dialog un-defers the task and promotes it to th
   await finishTask(request, t.num);
 });
 
+test("the dialog shows the decision as its widget, not a raw fenced code block (task 104)", async ({
+  page,
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("dec-nofence"));
+  poseDecision(t.num, Q, OPTS);
+  await gotoBoard(page);
+  await page.locator("#decisions-pill").click();
+  await page.locator(`[data-num="${t.num}"]`).click();
+
+  // The interactive widget renders...
+  await expect(page.locator(".decision-box .decision-question")).toContainText(Q);
+  // ...and the raw ```decision fence is NOT dumped into the body as a code block.
+  await expect(page.locator("#dialog-body pre code.language-decision")).toHaveCount(0);
+  await expect(page.locator("#dialog-body")).not.toContainText("allow_other");
+
+  await request.post(`${base}/tasks/${t.num}/answer`, { data: { choice: "Retry inline" } });
+  await finishTask(request, t.num);
+});
+
 test("the answer API rejects a choice that is not an option without mutating", async ({
   request,
 }) => {

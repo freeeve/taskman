@@ -50,10 +50,7 @@ function showActivity() {
   $("#features").hidden = true;
   $("#decisions").hidden = true;
   $("#activity").hidden = false;
-  $("#tab-tasks").classList.remove("active");
-  $("#tab-features").classList.remove("active");
-  $("#tab-decisions").classList.remove("active");
-  $("#tab-activity").classList.add("active");
+  setActiveTab("tab-activity");
   loadActivity().catch(showError);
 }
 

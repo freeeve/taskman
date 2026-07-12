@@ -17,10 +17,7 @@ function switchTab(toFeatures) {
   $("#features").hidden = !toFeatures;
   $("#activity").hidden = true;
   $("#decisions").hidden = true;
-  $("#tab-tasks").classList.toggle("active", !toFeatures);
-  $("#tab-features").classList.toggle("active", toFeatures);
-  $("#tab-activity").classList.remove("active");
-  $("#tab-decisions").classList.remove("active");
+  setActiveTab(toFeatures ? "tab-features" : "tab-tasks");
   if (toFeatures) loadFeatures().catch(showError);
 }
 

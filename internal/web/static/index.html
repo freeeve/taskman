@@ -9,11 +9,11 @@
 <body>
 <header>
   <h1>taskman</h1>
-  <nav class="tabs">
-    <button id="tab-tasks" class="active">tasks</button>
-    <button id="tab-features">features</button>
-    <button id="tab-activity">activity</button>
-    <button id="tab-decisions">decisions</button>
+  <nav class="tabs" role="tablist" aria-label="views">
+    <button id="tab-tasks" class="active" role="tab" aria-selected="true" aria-controls="board" tabindex="0">tasks</button>
+    <button id="tab-features" role="tab" aria-selected="false" aria-controls="features" tabindex="-1">features</button>
+    <button id="tab-activity" role="tab" aria-selected="false" aria-controls="activity" tabindex="-1">activity</button>
+    <button id="tab-decisions" role="tab" aria-selected="false" aria-controls="decisions" tabindex="-1">decisions</button>
   </nav>
   <div class="picker">
     <button id="project-button" title="switch project (ctrl+k)"></button>
@@ -34,10 +34,10 @@
     <div id="search-results" hidden></div>
   </div>
 </header>
-<main id="board"></main>
-<main id="features" hidden></main>
-<main id="activity" hidden></main>
-<main id="decisions" hidden></main>
+<main id="board" role="tabpanel" aria-labelledby="tab-tasks"></main>
+<main id="features" role="tabpanel" aria-labelledby="tab-features" hidden></main>
+<main id="activity" role="tabpanel" aria-labelledby="tab-activity" hidden></main>
+<main id="decisions" role="tabpanel" aria-labelledby="tab-decisions" hidden></main>
 <dialog id="task-dialog">
   <div class="dialog-head">
     <span id="dialog-file" class="mono"></span>

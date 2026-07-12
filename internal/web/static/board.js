@@ -681,6 +681,34 @@ function focusTask(num) {
   $(onFeatures ? "#tab-features" : "#tab-tasks").focus();
 }
 
+// setActiveTab keeps the tab strip's class, aria-selected, and roving
+// tabindex in lockstep so styling and announced state never drift.
+function setActiveTab(activeId) {
+  for (const id of ["tab-tasks", "tab-features", "tab-activity", "tab-decisions"]) {
+    const el = document.getElementById(id);
+    const active = id === activeId;
+    el.classList.toggle("active", active);
+    el.setAttribute("aria-selected", String(active));
+    el.tabIndex = active ? 0 : -1;
+  }
+}
+
+// wireTabArrows adds the tablist pattern's Left/Right roving navigation;
+// activation follows focus.
+function wireTabArrows() {
+  const order = ["tab-tasks", "tab-features", "tab-activity", "tab-decisions"];
+  document.querySelector(".tabs").addEventListener("keydown", (e) => {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const idx = order.indexOf(document.activeElement.id);
+    if (idx < 0) return;
+    e.preventDefault();
+    const step = e.key === "ArrowRight" ? 1 : order.length - 1;
+    const el = document.getElementById(order[(idx + step) % order.length]);
+    el.focus();
+    el.click();
+  });
+}
+
 // focusAfterRender lands keyboard focus on the first match of selector, or
 // of fallback when the target is gone -- for inline mutation controls (ship,
 // unship, the add buttons) whose re-render destroyed the focused element;
@@ -824,6 +852,7 @@ function wire() {
   wireLightDismiss();
   $("#new-task").addEventListener("click", newTask);
   $("#undo").addEventListener("click", undoLast);
+  wireTabArrows();
 }
 
 // dialogDirty reports whether an open editor holds unsaved changes: the

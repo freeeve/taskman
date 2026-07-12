@@ -73,10 +73,7 @@ function showDecisions(scope) {
   $("#features").hidden = true;
   $("#activity").hidden = true;
   $("#decisions").hidden = false;
-  for (const id of ["#tab-tasks", "#tab-features", "#tab-activity"]) {
-    $(id).classList.remove("active");
-  }
-  $("#tab-decisions").classList.add("active");
+  setActiveTab("tab-decisions");
   loadDecisions().catch(showError);
 }
 
@@ -85,7 +82,6 @@ for (const id of ["#tab-tasks", "#tab-features", "#tab-activity"]) {
   $(id).addEventListener("click", () => {
     decisionsVisible = false;
     $("#decisions").hidden = true;
-    $("#tab-decisions").classList.remove("active");
   });
 }
 $("#project").addEventListener("change", () => {

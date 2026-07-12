@@ -117,6 +117,28 @@ test("dangerous-scheme markdown links in a task body are rendered with a blanked
   await finishTask(request, t.num);
 });
 
+test("retitling to an over-long title is refused and leaves the task's slug and file intact", async ({
+  request,
+}) => {
+  // The retitle path renames the file, so an over-long slug must be rejected
+  // before any rename -- a clean 400 with the original task untouched, not a
+  // half-renamed or orphaned file. (Create-path length validation lives in
+  // api.spec; this locks the rename path.)
+  const t = await createTaskViaAPI(request, uniqueDesc("retitle-toolong"));
+  const res = await request.put(`${base}/tasks/${t.num}`, { data: { title: "a ".repeat(150) } });
+  expect(res.status()).toBe(400);
+  expect((await res.json()).error).toContain("too long");
+
+  // The task still resolves by its original slug and kept it.
+  const now = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(now.slug).toBe(t.slug);
+  expect((await request.get(`${base}/tasks/${t.slug}`)).ok()).toBeTruthy();
+
+  await finishTask(request, t.num);
+});
+
 test("an edit with neither title nor body is a clean 400", async ({ request }) => {
   const t = await createTaskViaAPI(request, uniqueDesc("edit-empty"));
   const res = await request.put(`${base}/tasks/${t.num}`, { data: {} });

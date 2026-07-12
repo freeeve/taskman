@@ -42,6 +42,31 @@ test("search finds a task by a distinctive token, with its project and identity"
   await finishTask(request, t.num);
 });
 
+test("retitling a task invalidates the old title in the index and surfaces the new one", async ({
+  request,
+}) => {
+  // Freshness is not just addition: the index tracks git HEAD, so a retitle must
+  // DROP the old title's match, not merely add the new one. A stale (append-only)
+  // index would keep matching the old token.
+  const oldTok = token("old");
+  const newTok = token("new");
+  const t = await createTaskViaAPI(request, `search ${oldTok}`);
+
+  const hitFor = async (tok: string) =>
+    ((await (await request.get(`${BASE_URL}/api/search?q=${tok}`)).json()) as { num: number }[]).some(
+      (h) => h.num === t.num
+    );
+  expect(await hitFor(oldTok), "the old title is searchable before the retitle").toBe(true);
+
+  const res = await request.put(`${base}/tasks/${t.num}`, { data: { title: `search ${newTok}` } });
+  expect(res.ok()).toBeTruthy();
+
+  expect(await hitFor(oldTok), "the old title no longer matches (index invalidated)").toBe(false);
+  expect(await hitFor(newTok), "the new title matches at once").toBe(true);
+
+  await finishTask(request, t.num);
+});
+
 test("search finds a feature by a body token; a non-matching query is empty", async ({
   request,
 }) => {

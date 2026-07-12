@@ -795,12 +795,49 @@ function renderActions(t) {
 // updateDecisionsPill surfaces the CROSS-PROJECT count of unanswered
 // decisions in the header: the inbox exists so something needing you is
 // visible whichever project is open. Clicking it opens the decisions view
-// (wired in decisions.js).
+// (wired in decisions.js). The same count feeds the tab chrome.
 async function updateDecisionsPill() {
   const rows = await api("/api/decisions");
   const pill = $("#decisions-pill");
   pill.hidden = rows.length === 0;
   pill.textContent = rows.length === 1 ? "1 decision" : `${rows.length} decisions`;
+  updateTabBadge(rows.length);
+}
+
+// updateTabBadge mirrors the decision count into the tab chrome -- a title
+// prefix and a favicon dot -- so a backgrounded board tab still signals that
+// something is waiting on a human.
+function updateTabBadge(count) {
+  document.title = count > 0 ? `(${count}) taskman` : "taskman";
+  const link = $("#favicon");
+  if (!link) return;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = 32;
+  const g = canvas.getContext("2d");
+  if (!g) return;
+  const styles = getComputedStyle(document.documentElement);
+  g.fillStyle = styles.getPropertyValue("--accent").trim() || "#2f5a88";
+  if (g.roundRect) {
+    g.beginPath();
+    g.roundRect(2, 2, 28, 28, 7);
+    g.fill();
+  } else {
+    g.fillRect(2, 2, 28, 28);
+  }
+  g.fillStyle = "#ffffff";
+  g.fillRect(8, 9, 16, 3);
+  g.fillRect(8, 15, 16, 3);
+  g.fillRect(8, 21, 10, 3);
+  if (count > 0) {
+    g.fillStyle = styles.getPropertyValue("--danger").trim() || "#d07a72";
+    g.beginPath();
+    g.arc(24, 8, 7, 0, Math.PI * 2);
+    g.fill();
+    g.strokeStyle = "#ffffff";
+    g.lineWidth = 2;
+    g.stroke();
+  }
+  link.href = canvas.toDataURL("image/png");
 }
 
 // undoLast reverts the project's newest taskman commit after showing the

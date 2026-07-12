@@ -138,3 +138,59 @@ test("the open inbox drops a decision answered out-of-band on window focus (task
 
   await finishTask(request, t.num);
 });
+
+test("the tab title and favicon badge the live cross-project decision count", async ({
+  page,
+  request,
+}) => {
+  // The same cross-project count that feeds the header pill also drives the tab
+  // chrome so a backgrounded tab still signals a waiting decision: the title
+  // gains a "(N) taskman" prefix and the canvas favicon a dot. The count is
+  // cross-project, so assert the title tracks the authoritative /api/decisions
+  // length rather than a fixed number (other sessions may hold decisions too).
+  await gotoBoard(page);
+
+  const titleCount = async () => {
+    const t = await page.title();
+    const m = t.match(/^\((\d+)\) taskman$/);
+    return m ? Number(m[1]) : t === "taskman" ? 0 : NaN;
+  };
+  const liveCount = async () =>
+    (await (await request.get(`${BASE_URL}/api/decisions`)).json()).length;
+
+  const t = await createTaskViaAPI(request, uniqueDesc("dv-badge"));
+  poseDecision(t.num, "Badge me?", ["Yes::a", "No::b"]);
+
+  // Reload (a deterministic recompute -- no refreshStale debounce) until the
+  // title count converges on the live count and reflects our just-posed one.
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        await page.waitForLoadState("networkidle");
+        return (await titleCount()) === (await liveCount()) && (await titleCount()) >= 1;
+      },
+      { timeout: 15_000, intervals: [400, 800, 1500] }
+    )
+    .toBe(true);
+  await expect(page).toHaveTitle(/^\(\d+\) taskman$/);
+
+  // The favicon is a freshly drawn PNG data URL -- canvas only, no external asset.
+  const favicon = await page.evaluate(() => document.getElementById("favicon")?.href || "");
+  expect(favicon).toMatch(/^data:image\/png/);
+
+  // Answering our decision drops the count; the badge follows it back down.
+  expect((await request.post(`${base}/tasks/${t.num}/answer`, { data: { choice: "Yes" } })).ok()).toBeTruthy();
+  await expect
+    .poll(
+      async () => {
+        await page.reload();
+        await page.waitForLoadState("networkidle");
+        return (await titleCount()) === (await liveCount());
+      },
+      { timeout: 15_000, intervals: [400, 800, 1500] }
+    )
+    .toBe(true);
+
+  await finishTask(request, t.num);
+});

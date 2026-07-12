@@ -118,3 +118,23 @@ test("the this-project view shows an empty state when the project has no decisio
   await expect(page.locator("#decisions .empty")).toHaveText("no decisions awaiting you");
   await expect(page.locator(".decision-row")).toHaveCount(0);
 });
+
+test("the open inbox drops a decision answered out-of-band on window focus (task 106)", async ({
+  page,
+  request,
+}) => {
+  const t = await createTaskViaAPI(request, uniqueDesc("dv-focus"));
+  poseDecision(t.num, "Out-of-band answer refreshes?", ["Yes::a", "No::b"]);
+  await gotoBoard(page);
+  await page.locator("#decisions-pill").click();
+  const row = page.locator(".decision-row", { hasText: "Out-of-band answer refreshes?" });
+  await expect(row).toBeVisible();
+
+  // Another session answers it directly (not through this tab).
+  expect((await request.post(`${base}/tasks/${t.num}/answer`, { data: { choice: "Yes" } })).ok()).toBeTruthy();
+  // Regaining focus refreshes the decisions view (085/106), dropping the row.
+  await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+  await expect(row).toHaveCount(0);
+
+  await finishTask(request, t.num);
+});

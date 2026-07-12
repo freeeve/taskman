@@ -114,3 +114,29 @@ test("the dialog offers the lifecycle actions valid for the task's state", async
   await openCard(page, deferred.num);
   await expect(page.locator("#dialog-actions button")).toHaveText(["resume"]);
 });
+
+test("the view tabs form an ARIA tablist with aria-selected and arrow-key navigation (task 111)", async ({
+  page,
+}) => {
+  await expect(page.locator('[role="tablist"]')).toBeVisible();
+  await expect(page.locator('[role="tab"]')).toHaveCount(4);
+  await expect(page.locator('[role="tabpanel"]')).toHaveCount(4);
+
+  // On the tasks view the tasks tab is selected with roving tabindex 0.
+  await expect(page.locator("#tab-tasks")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator("#tab-tasks")).toHaveAttribute("tabindex", "0");
+  await expect(page.locator("#tab-features")).toHaveAttribute("aria-selected", "false");
+  await expect(page.locator("#tab-features")).toHaveAttribute("tabindex", "-1");
+
+  // Switching updates aria-selected; exactly one tab is selected at a time.
+  await page.locator("#tab-features").click();
+  await expect(page.locator("#tab-features")).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator('[role="tab"][aria-selected="true"]')).toHaveCount(1);
+
+  // Left/Right arrows rove and activate (activation follows focus).
+  await page.locator("#tab-features").focus();
+  await page.keyboard.press("ArrowRight");
+  await expect(page.locator("#tab-activity")).toHaveAttribute("aria-selected", "true");
+  await page.keyboard.press("ArrowLeft");
+  await expect(page.locator("#tab-features")).toHaveAttribute("aria-selected", "true");
+});

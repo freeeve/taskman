@@ -97,8 +97,15 @@ test("answering an option in the dialog un-defers the task and promotes it to th
   await expect(box).toContainText("Keeps moving; needs a durable queue");
   await expect(box.locator(".decision-other")).toBeVisible();
 
-  // Answer the second option.
-  await opts.nth(1).click();
+  // Answer the second option. The dialog closes optimistically, so wait on
+  // the answer POST itself before reading server state -- otherwise the /tasks
+  // read can race the still-committing mutation.
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/tasks/${t.num}/answer`) && r.request().method() === "POST"
+    ),
+    opts.nth(1).click(),
+  ]);
   await expect(page.locator("#task-dialog")).toBeHidden();
 
   // Server state: un-deferred, no live decision, promoted to the top of order.
@@ -197,7 +204,14 @@ test("answering via the Other free-text field records the note and promotes the 
 
   const other = "neither -- add a circuit breaker";
   await page.locator(".decision-other input").fill(other);
-  await page.locator(".decision-other button").click();
+  // The dialog closes optimistically; wait on the answer POST before reading
+  // server state so the /tasks read cannot race the still-committing mutation.
+  await Promise.all([
+    page.waitForResponse(
+      (r) => r.url().endsWith(`/tasks/${t.num}/answer`) && r.request().method() === "POST"
+    ),
+    page.locator(".decision-other button").click(),
+  ]);
   await expect(page.locator("#task-dialog")).toBeHidden();
 
   const t2 = (await (await request.get(`${base}/tasks`)).json()).tasks.find(

@@ -494,6 +494,12 @@ function render() {
 }
 
 async function openTask(key) {
+  // Direct opens (cards, chips, search) drop any decisions-view return
+  // marker; router-driven opens keep it, since a decisions row travels
+  // through a hash change to get here.
+  if (typeof applyingHash === "undefined" || !applyingHash) {
+    state.decisionsReturn = null;
+  }
   const data = await api(`/api/projects/${state.project}/tasks/${key}`);
   // The dialog tracks the resolved number, not the lookup key: stems open
   // duplicate-numbered tasks, but hash sync and focus want the number.
@@ -520,9 +526,17 @@ function renderDecision(t, d) {
 
   const answer = (payload) => {
     $("#task-dialog").close();
-    mutate(() => post(`/api/projects/${state.project}/tasks/${t.num}/answer`, payload)).then(() =>
-      focusTask(t.num)
-    );
+    mutate(() => post(`/api/projects/${state.project}/tasks/${t.num}/answer`, payload)).then(() => {
+      // A row-originated answer returns to the decisions list (now fresh);
+      // otherwise stay on the board with focus on the task.
+      const ret = state.decisionsReturn;
+      state.decisionsReturn = null;
+      if (ret) {
+        location.hash = ret;
+        return;
+      }
+      focusTask(t.num);
+    });
   };
   for (const opt of d.options) {
     const btn = document.createElement("button");

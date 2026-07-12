@@ -49,6 +49,9 @@ async function loadDecisions() {
     opts.textContent = `${row.options} options`;
     el.append(opts);
     el.addEventListener("click", () => {
+      // Remember where to land after answering: the dialog opens over the
+      // board, and without this the user is stranded there.
+      state.decisionsReturn = location.hash;
       location.hash = `#/p/${row.project}/task/${row.num}`;
     });
     view.append(el);

@@ -183,3 +183,27 @@ test("retitling a task to another task's title is refused, keeping both slugs un
   await finishTask(request, a.num);
   await finishTask(request, b.num);
 });
+
+test("a done task's slug stays reserved: retitling an active task onto it is refused (task 108)", async ({
+  request,
+}) => {
+  // Slug uniqueness must span statuses, not just active tasks -- a done task's
+  // file (slug.done.md) still owns its slug, so allowing a collision would make
+  // slug lookup ambiguous.
+  const doneDesc = uniqueDesc("done-slug");
+  const done = await createTaskViaAPI(request, doneDesc);
+  await setStatusViaAPI(request, done.num, "done");
+  const active = await createTaskViaAPI(request, uniqueDesc("active-slug"));
+
+  const res = await request.put(`${base}/tasks/${active.num}`, { data: { title: doneDesc } });
+  expect(res.status()).toBe(409);
+
+  // The slug still resolves to the done task alone; the active task keeps its own.
+  const lookup = await request.get(`${base}/tasks/${done.slug}`);
+  expect(lookup.ok()).toBeTruthy();
+  expect((await lookup.json()).task.num).toBe(done.num);
+  const tasks = (await (await request.get(`${base}/tasks`)).json()).tasks;
+  expect(tasks.find((t: { num: number }) => t.num === active.num).slug).toBe(active.slug);
+
+  await finishTask(request, active.num);
+});

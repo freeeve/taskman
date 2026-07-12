@@ -173,6 +173,22 @@ main#board {
   font-weight: 600;
 }
 
+.decisions-banner {
+  display: block;
+  width: calc(100% - 32px);
+  margin: 10px 16px 0;
+  padding: 10px 14px;
+  border: 1px solid var(--pending);
+  border-radius: 10px;
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.decisions-banner:hover { border-color: var(--accent); }
+
 .decision-box {
   margin: 12px 0;
   padding: 12px 14px;

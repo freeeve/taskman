@@ -801,7 +801,28 @@ async function updateDecisionsPill() {
   const pill = $("#decisions-pill");
   pill.hidden = rows.length === 0;
   pill.textContent = rows.length === 1 ? "1 decision" : `${rows.length} decisions`;
+  pendingDecisionCount = rows.length;
   updateTabBadge(rows.length);
+  updateDecisionsBanner();
+}
+
+// pendingDecisionCount caches the last cross-project decision count so view
+// switches can re-evaluate the banner without refetching.
+let pendingDecisionCount = 0;
+
+// updateDecisionsBanner shows a click-through strip above the columns while
+// decisions await, hidden on the decisions views themselves where it would
+// only point at where the user already is. Every view switcher calls this.
+function updateDecisionsBanner() {
+  const banner = $("#decisions-banner");
+  const onDecisions = typeof decisionsVisible !== "undefined" && decisionsVisible;
+  banner.hidden = pendingDecisionCount === 0 || onDecisions;
+  if (!banner.hidden) {
+    banner.textContent =
+      pendingDecisionCount === 1
+        ? "1 decision is waiting on an answer · open the inbox"
+        : `${pendingDecisionCount} decisions are waiting on an answer · open the inbox`;
+  }
 }
 
 // updateTabBadge mirrors the decision count into the tab chrome -- a title

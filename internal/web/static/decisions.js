@@ -74,6 +74,7 @@ function showDecisions(scope) {
   $("#activity").hidden = true;
   $("#decisions").hidden = false;
   setActiveTab("tab-decisions");
+  updateDecisionsBanner();
   loadDecisions().catch(showError);
 }
 
@@ -87,5 +88,6 @@ for (const id of ["#tab-tasks", "#tab-features", "#tab-activity"]) {
 $("#project").addEventListener("change", () => {
   if (decisionsVisible) loadDecisions().catch(showError);
 });
-// The header pill is the inbox's front door.
+// The header pill is the inbox's front door; the banner is the loud one.
 $("#decisions-pill").addEventListener("click", () => showDecisions("all"));
+$("#decisions-banner").addEventListener("click", () => showDecisions("all"));

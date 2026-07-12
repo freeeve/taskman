@@ -51,6 +51,7 @@ function showActivity() {
   $("#decisions").hidden = true;
   $("#activity").hidden = false;
   setActiveTab("tab-activity");
+  updateDecisionsBanner();
   loadActivity().catch(showError);
 }
 

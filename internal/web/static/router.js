@@ -112,6 +112,7 @@ for (const id of ["#tab-tasks", "#tab-features", "#tab-activity", "#tab-decision
   $(id).addEventListener("click", () => writeHash());
 }
 $("#decisions-pill").addEventListener("click", () => writeHash());
+$("#decisions-banner").addEventListener("click", () => writeHash());
 // Spec panel toggles: non-bubbling, so capture. Only genuine user toggles
 // win the hash -- rebuild-fired toggles (renderFeatures recreating open
 // panels) are suppressed via renderingFeatures, or they feedback-loop with

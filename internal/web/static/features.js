@@ -18,6 +18,7 @@ function switchTab(toFeatures) {
   $("#activity").hidden = true;
   $("#decisions").hidden = true;
   setActiveTab(toFeatures ? "tab-features" : "tab-tasks");
+  updateDecisionsBanner();
   if (toFeatures) loadFeatures().catch(showError);
 }
 

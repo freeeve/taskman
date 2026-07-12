@@ -136,3 +136,57 @@ test("clicking a feature search result deep-links to and opens that spec panel",
   await expect(page.locator("#tab-features")).toHaveClass(/active/);
   await expect(page.locator(`.feature-card[data-slug="${slug}"] details[open]`)).toHaveCount(1);
 });
+
+/**
+ * Truncation affordance (task 114): the box shows at most 30 hits and, when a
+ * query matches more, appends a dim "refine your search" footer so results are
+ * never dropped silently. The fix fetches SEARCH_LIMIT+1 and only shows the
+ * footer on a true overflow, so an exactly-30 result set must NOT display it.
+ * The footer row carries the `dim` class so Enter-selects-first skips it.
+ */
+test("a query matching more than 30 items shows 30 hits plus a truncation footer (task 114)", async ({
+  page,
+  request,
+}) => {
+  const tok = token("trunc");
+  // 31 docs sharing one token is the minimum that overflows the 30-row cap.
+  await Promise.all(
+    Array.from({ length: 31 }, (_, i) => createTaskViaAPI(request, `bulk ${tok} n${i}`))
+  );
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/search")),
+    page.locator("#search").fill(tok),
+  ]);
+
+  const hitRows = page.locator("#search-results .search-row:not(.dim)");
+  await expect(hitRows).toHaveCount(30);
+  const footer = page.locator("#search-results .search-row.dim");
+  await expect(footer).toBeVisible();
+  await expect(footer).toContainText(/refine your search/i);
+});
+
+test("a query matching 30 or fewer items shows no truncation footer (task 114)", async ({
+  page,
+  request,
+}) => {
+  const tok = token("nofoot");
+  const made = await Promise.all([
+    createTaskViaAPI(request, `few ${tok} one`),
+    createTaskViaAPI(request, `few ${tok} two`),
+    createTaskViaAPI(request, `few ${tok} three`),
+  ]);
+
+  await gotoBoard(page);
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes("/api/search")),
+    page.locator("#search").fill(tok),
+  ]);
+
+  await expect(page.locator("#search-results .search-row:not(.dim)")).toHaveCount(3);
+  // The limit+1 fetch means an at-or-under-cap result set never lies with a footer.
+  await expect(page.locator("#search-results .search-row.dim")).toHaveCount(0);
+
+  for (const t of made) await finishTask(request, t.num);
+});

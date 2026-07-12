@@ -49,6 +49,9 @@ func testStore(t *testing.T) (string, *httptest.Server) {
 		[]byte("# Kanban\n\nTasks: 001, 002, 099\n\n![diag](../screenshots/002/x.png)\n\n[pr](https://github.com/x/1)\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(home, ".gitignore"), []byte(".lock\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("GIT_AUTHOR_NAME", "Test")
 	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.org")
 	t.Setenv("GIT_COMMITTER_NAME", "Test")
@@ -1282,6 +1285,21 @@ func TestEditTask(t *testing.T) {
 	if deferredEdit.File != "004_still-held.deferred.md" || !deferredEdit.Deferred {
 		t.Errorf("deferred retitle = %+v", deferredEdit)
 	}
+	// Retitling to another task's slug is refused with both left intact.
+	var collide struct {
+		Error string `json:"error"`
+	}
+	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/4",
+		map[string]string{"title": "Wire the whole API"}, &collide); code != 409 ||
+		!strings.Contains(collide.Error, "already used") {
+		t.Errorf("cross-task retitle: code %d err %q", code, collide.Error)
+	}
+	// Creating a duplicate slug is likewise a conflict.
+	if code := send(t, srv, "POST", "/api/projects/myproj/tasks",
+		map[string]string{"description": "Wire the whole API"}, nil); code != 409 {
+		t.Errorf("duplicate-slug create status %d", code)
+	}
+
 	// Empty edit 400s; unknown task 404s.
 	if code := send(t, srv, "PUT", "/api/projects/myproj/tasks/2", map[string]string{}, nil); code != 400 {
 		t.Errorf("empty edit status %d", code)

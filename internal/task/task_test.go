@@ -383,17 +383,46 @@ func TestRetitle(t *testing.T) {
 	if _, err := tw.Retitle("!!!"); err == nil {
 		t.Error("empty slug must be refused")
 	}
+	// Same-number clobber (duplicate numbers): the sibling slug check skips
+	// same-number entries, so the O_EXCL-style stat guard must still refuse.
 	renamed, _ := Find(tasks, "12")
-	if err := os.WriteFile(filepath.Join(dir, "012_taken.in-progress.md"), []byte("# x\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "012_occupied.in-progress.md"), []byte("# x\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := renamed.Retitle("Taken"); err == nil ||
+	if _, err := renamed.Retitle("Occupied"); err == nil ||
 		!strings.Contains(err.Error(), "refusing to overwrite") {
 		t.Errorf("clobber refusal = %v", err)
 	}
 	ask := Task{Dir: dir, File: "qbd_x.md", Prefix: "qbd", Slug: "x"}
 	if _, err := ask.Retitle("New"); err == nil {
 		t.Error("unadopted ask must refuse Retitle")
+	}
+
+	// A slug another task owns is refused, leaving both untouched.
+	tasks, _ = Load(dir)
+	taken, _ := Find(tasks, "7")
+	before, _ := os.ReadFile(taken.Path())
+	if _, err := taken.Retitle("Shiny NEW name"); err == nil ||
+		!strings.Contains(err.Error(), "already used") {
+		t.Errorf("cross-task slug collision = %v", err)
+	}
+	if after, _ := os.ReadFile(taken.Path()); string(after) != string(before) {
+		t.Error("refused retitle must not touch the file")
+	}
+}
+
+// TestNewRefusesDuplicateSlug pins slug uniqueness at creation, the same
+// rule file has always enforced: a duplicate slug makes both tasks
+// unreachable by name.
+func TestNewRefusesDuplicateSlug(t *testing.T) {
+	dir := ledger(t, "003_same-title.done.md")
+	tasks, _ := Load(dir)
+	if _, err := New(dir, tasks, "Same title", "", "2026-07-11"); err == nil ||
+		!strings.Contains(err.Error(), "already used") {
+		t.Errorf("duplicate slug on new = %v", err)
+	}
+	if _, err := New(dir, tasks, "Different title", "", "2026-07-11"); err != nil {
+		t.Errorf("fresh slug must create: %v", err)
 	}
 }
 

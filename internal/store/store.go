@@ -50,12 +50,25 @@ func Ensure() (string, error) {
 			return "", fmt.Errorf("git init %s: %v: %s", home, err, strings.TrimSpace(string(out)))
 		}
 	}
+	var seeds []string
 	readme := filepath.Join(home, "README.md")
 	if _, err := os.Stat(readme); os.IsNotExist(err) {
 		if err := os.WriteFile(readme, []byte(seedReadme), 0o644); err != nil {
 			return "", err
 		}
-		if err := Commit(home, "chore(store): initialize taskman store", []string{readme}); err != nil {
+		seeds = append(seeds, readme)
+	}
+	// The cross-process lock file is infrastructure, not ledger state; keep
+	// it out of git status.
+	gitignore := filepath.Join(home, ".gitignore")
+	if _, err := os.Stat(gitignore); os.IsNotExist(err) {
+		if err := os.WriteFile(gitignore, []byte(".lock\n"), 0o644); err != nil {
+			return "", err
+		}
+		seeds = append(seeds, gitignore)
+	}
+	if len(seeds) > 0 {
+		if err := Commit(home, "chore(store): initialize taskman store", seeds); err != nil {
 			fmt.Fprintf(os.Stderr, "taskman: store seed not committed (%v)\n", err)
 		}
 	}

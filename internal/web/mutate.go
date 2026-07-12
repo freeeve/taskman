@@ -92,7 +92,11 @@ func (s *server) createTask(w http.ResponseWriter, r *http.Request) {
 				fmt.Errorf("task number was claimed concurrently; retry"))
 			return
 		}
-		writeErr(w, http.StatusBadRequest, err)
+		code := http.StatusBadRequest
+		if strings.Contains(err.Error(), "already used") {
+			code = http.StatusConflict
+		}
+		writeErr(w, code, err)
 		return
 	}
 	msg, paths := "open "+t.Stem(), []string{t.Path()}
@@ -551,7 +555,8 @@ func (s *server) editTask(w http.ResponseWriter, r *http.Request) {
 		nt, err := t.Retitle(strings.TrimSpace(req.Title))
 		if err != nil {
 			code := http.StatusBadRequest
-			if strings.Contains(err.Error(), "refusing to overwrite") {
+			if strings.Contains(err.Error(), "refusing to overwrite") ||
+				strings.Contains(err.Error(), "already used") {
 				code = http.StatusConflict
 			}
 			writeErr(w, code, err)

@@ -121,8 +121,10 @@ func (t Task) Renumber(num int) (Task, error) {
 
 // Retitle gives the task a new description: the H1 is rewritten to the
 // numbered form and the file renamed to the new slug, keeping number, lane,
-// status, and deferral. An existing file at the target is refused rather
-// than clobbered (os.Rename replaces silently).
+// status, and deferral. A slug another task already uses is refused --
+// slugs are lookup keys, and a duplicate makes both tasks unreachable by
+// name -- as is an existing file at the target (os.Rename replaces
+// silently).
 func (t Task) Retitle(desc string) (Task, error) {
 	if !t.HasNum {
 		return t, fmt.Errorf("%s has no number; adopt it before retitling", t.File)
@@ -130,6 +132,19 @@ func (t Task) Retitle(desc string) (Task, error) {
 	slug := Slugify(desc)
 	if err := CheckSlug(slug); err != nil {
 		return t, err
+	}
+	siblings, err := Load(t.Dir)
+	if err != nil {
+		return t, err
+	}
+	for _, other := range siblings {
+		if other.Slug != slug {
+			continue
+		}
+		if other.HasNum && other.Num == t.Num {
+			continue
+		}
+		return t, fmt.Errorf("slug %q is already used by %s", slug, other.File)
 	}
 	if err := retitleH1(t.Path(), t.Num, desc); err != nil {
 		return t, err
@@ -203,12 +218,19 @@ func CheckSlug(slug string) error {
 }
 
 // New creates the next numbered pending task in dir with the standard body,
-// returning it. The lane must already be slugified (or empty); desc keeps its
-// human form in the title.
+// returning it. The lane must already be slugified (or empty); desc keeps
+// its human form in the title. A slug already in use is refused (matching
+// the file command's long-standing rule): slugs are lookup keys, and a
+// duplicate makes both tasks unreachable by name.
 func New(dir string, tasks []Task, desc, lane, date string) (Task, error) {
 	slug := Slugify(desc)
 	if err := CheckSlug(slug); err != nil {
 		return Task{}, err
+	}
+	for _, other := range tasks {
+		if other.Slug == slug {
+			return Task{}, fmt.Errorf("slug %q is already used by %s; pick a distinct description", slug, other.File)
+		}
 	}
 	t := Task{Dir: dir, Num: NextNum(tasks), HasNum: true, Slug: slug, Lane: lane}
 	t.File = t.Name()

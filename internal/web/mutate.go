@@ -740,11 +740,22 @@ func (s *server) deleteFeature(w http.ResponseWriter, r *http.Request) {
 }
 
 // undoable reports whether a commit subject is one this store minted for the
-// project (a taskman mutation or a previous undo of one); anything else --
-// hand commits, seeds, other tools -- is not ours to revert.
+// project (a taskman mutation or any depth of undo/redo of one); anything
+// else -- hand commits, seeds, other tools -- is not ours to revert.
+// Repeated reverts nest wrappers git spells as `Revert "..."` or, for a
+// revert of a revert, `Reapply "..."`, so the wrappers are stripped until the
+// innermost subject is exposed.
 func undoable(subject, project string) bool {
-	return strings.HasPrefix(subject, "chore("+project+"):") ||
-		strings.HasPrefix(subject, `Revert "chore(`+project+`):`)
+	for {
+		switch {
+		case strings.HasPrefix(subject, `Revert "`):
+			subject = strings.TrimPrefix(subject, `Revert "`)
+		case strings.HasPrefix(subject, `Reapply "`):
+			subject = strings.TrimPrefix(subject, `Reapply "`)
+		default:
+			return strings.HasPrefix(subject, "chore("+project+"):")
+		}
+	}
 }
 
 // undoTarget resolves the project's newest commit and vets it.

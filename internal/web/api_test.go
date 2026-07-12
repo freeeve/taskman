@@ -1518,6 +1518,38 @@ func TestActivity(t *testing.T) {
 	}
 }
 
+// TestUndoable pins the subject vetting: taskman mutations and any depth of
+// git's revert wrappers (Revert, Reapply, nested Revert-of-Revert) are ours;
+// foreign subjects and other projects' commits are not (task 116).
+func TestUndoable(t *testing.T) {
+	yes := []string{
+		`chore(myproj): done 002_build-board`,
+		`Revert "chore(myproj): done 002_build-board"`,
+		`Reapply "chore(myproj): done 002_build-board"`,
+		`Revert "Revert "chore(myproj): done 002_build-board""`,
+		`Revert "Reapply "chore(myproj): done 002_build-board""`,
+	}
+	for _, s := range yes {
+		if !undoable(s, "myproj") {
+			t.Errorf("undoable(%q) = false, want true", s)
+		}
+	}
+	no := []string{
+		`manual edit`,
+		`chore(otherproj): open 001_x`,
+		`Revert "chore(otherproj): open 001_x"`,
+		`Reapply "chore(otherproj): open 001_x"`,
+		`Revert "manual edit"`,
+		`Reapply "Revert "seed""`,
+		`feat(myproj): not a store commit`,
+	}
+	for _, s := range no {
+		if undoable(s, "myproj") {
+			t.Errorf("undoable(%q) = true, want false", s)
+		}
+	}
+}
+
 // TestUndo pins the revert path: undo restores the prior state as its own
 // commit, targets THIS project's newest taskman commit (not repo HEAD),
 // refuses stale hashes and foreign commits, and an undo is itself undoable.
@@ -1588,6 +1620,21 @@ func TestUndo(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, "002_build-board.done.md")); err != nil {
 		t.Errorf("redo did not restore done state: %v", err)
+	}
+
+	// The chain stays undoable past a redo: git names a revert-of-a-revert
+	// `Reapply "..."` (or nests `Revert "Revert "..."` on older versions),
+	// and peek must still recognize it as ours instead of jamming with a
+	// "not a taskman mutation" 409 (task 116).
+	if code := get(t, srv, "/api/projects/myproj/undo", &peek); code != 200 {
+		t.Fatalf("peek after redo status %d (subject %q)", code, lastSubject(t, home))
+	}
+	if code := send(t, srv, "POST", "/api/projects/myproj/undo",
+		map[string]string{"commit": peek.Commit}, nil); code != 200 {
+		t.Fatalf("third undo (after redo) failed on %q", peek.Subject)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "002_build-board.md")); err != nil {
+		t.Errorf("third undo did not flip back to pending: %v", err)
 	}
 
 	// A foreign (hand) commit touching the project is refused.

@@ -251,3 +251,41 @@ test("a plain resume refuses a live decision, and a second answer 409s", async (
 
   await finishTask(request, t.num);
 });
+
+test("concurrent answers on one live decision resolve it exactly once -- one winner, no double-apply", async ({
+  request,
+}) => {
+  // The 409 guard above is sequential; this locks it under a TRUE race. Many
+  // sessions answer the same live decision at once. Serialized behind the store
+  // lock, exactly one applies (200) and the rest see it already answered (409).
+  // Two winners -- or two answer records / a double promote -- would corrupt the
+  // decision.
+  const answers = 6;
+  const t = await createTaskViaAPI(request, uniqueDesc("dec-answer-race"));
+  poseDecision(t.num, Q, OPTS);
+
+  const choices = ["Retry inline", "Queue for later"];
+  const statuses = await Promise.all(
+    Array.from({ length: answers }, (_, i) =>
+      request
+        .post(`${base}/tasks/${t.num}/answer`, { data: { choice: choices[i % 2] } })
+        .then((r) => r.status())
+    )
+  );
+  expect(statuses.filter((s) => s === 200), `statuses: ${statuses}`).toHaveLength(1);
+  expect(statuses.filter((s) => s === 409)).toHaveLength(answers - 1);
+  expect(statuses.every((s) => s === 200 || s === 409)).toBe(true);
+
+  // Authoritative post-race state: answered exactly once, no live decision left,
+  // and the task is un-deferred (the single winner promoted it).
+  const listed = (await (await request.get(`${base}/tasks`)).json()).tasks.find(
+    (x: { num: number }) => x.num === t.num
+  );
+  expect(listed.has_decision).toBe(false);
+  expect(listed.deferred).toBe(false);
+  const detail = await (await request.get(`${base}/tasks/${t.num}`)).json();
+  expect(detail.decision, "no live decision remains").toBeNull();
+  expect((detail.body.match(/decision answered/gi) || []).length, "exactly one answer record").toBe(1);
+
+  await finishTask(request, t.num);
+});

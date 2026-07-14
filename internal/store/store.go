@@ -51,28 +51,68 @@ func Ensure() (string, error) {
 		}
 	}
 	var seeds []string
+	fresh := false
 	readme := filepath.Join(home, "README.md")
 	if _, err := os.Stat(readme); os.IsNotExist(err) {
 		if err := os.WriteFile(readme, []byte(seedReadme), 0o644); err != nil {
 			return "", err
 		}
 		seeds = append(seeds, readme)
+		fresh = true
 	}
-	// The cross-process lock file is infrastructure, not ledger state; keep
-	// it out of git status.
-	gitignore := filepath.Join(home, ".gitignore")
-	if _, err := os.Stat(gitignore); os.IsNotExist(err) {
-		if err := os.WriteFile(gitignore, []byte(".lock\n"), 0o644); err != nil {
-			return "", err
-		}
+	// The cross-process store lock and the resource locks are machine state,
+	// not ledger state: keep both out of git status.
+	gitignore, err := ensureIgnored(home, ".lock", ".locks/")
+	if err != nil {
+		return "", err
+	}
+	if gitignore != "" {
 		seeds = append(seeds, gitignore)
 	}
 	if len(seeds) > 0 {
-		if err := Commit(home, "chore(store): initialize taskman store", seeds); err != nil {
+		msg := "chore(store): ignore machine-local lock state"
+		if fresh {
+			msg = "chore(store): initialize taskman store"
+		}
+		if err := Commit(home, msg, seeds); err != nil {
 			fmt.Fprintf(os.Stderr, "taskman: store seed not committed (%v)\n", err)
 		}
 	}
 	return home, nil
+}
+
+// ensureIgnored adds any missing entries to the store's .gitignore, returning
+// its path when it changed (so the caller commits it) and "" when it already
+// covered them. Stores predate any given entry, so this appends rather than
+// seeding the file only on first use.
+func ensureIgnored(home string, want ...string) (string, error) {
+	path := filepath.Join(home, ".gitignore")
+	data, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return "", err
+	}
+	have := map[string]bool{}
+	for line := range strings.SplitSeq(string(data), "\n") {
+		have[strings.TrimSpace(line)] = true
+	}
+	var add []string
+	for _, w := range want {
+		if !have[w] {
+			add = append(add, w)
+		}
+	}
+	if len(add) == 0 {
+		return "", nil
+	}
+	body := string(data)
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
+	body += strings.Join(add, "\n") + "\n"
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
 }
 
 // EnsureProject creates the project's directory skeleton on first use and

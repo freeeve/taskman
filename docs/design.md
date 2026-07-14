@@ -94,6 +94,26 @@ refusing loudly is safer than guessing.
 **Stateless handlers.** Every request re-reads disk. The ledgers are small
 (hundreds of files); correctness and CLI/UI coexistence beat microseconds.
 
+**Resource locks are not task status.** The obvious cheap lock -- a well-known
+task you `start` to claim and `done` to release -- is wrong, and instructively
+so: the store is a multi-writer git ledger with no cross-process locking, which
+is exactly why `taskman fix` has to repair duplicate numbers. A status-flag
+claim races the same way, so two sessions would both "acquire" and both
+benchmark. Mutual exclusion needs an atomic primitive, so `taskman lock` rests
+on `link(2)` into a gitignored `.locks/` and commits nothing. The ledger gives
+an audit trail; it does not give exclusion.
+
+**Locks are machine-scoped and per-resource.** CPU contention is a property of
+the box, not of a project, so the lock lives in the store root (the one path
+every session shares) and names a resource rather than a repo. One global
+`bench` mutex would serialize a remote RageDB sweep behind a local Rust sweep,
+which contend for nothing -- costing throughput without buying accuracy.
+
+**A lock only excludes cooperating processes.** `taskman lock` cannot stop an
+unrelated VM from saturating the machine, so a caller still needs a pre-flight
+load gate and a post-flight canary on the host under test. Taskman owns mutual
+exclusion; it does not own load measurement.
+
 ## Assumptions
 
 - One human, one machine, local trust boundary; no remote store sync. If

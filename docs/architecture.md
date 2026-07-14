@@ -5,6 +5,8 @@
 ```
 $TASKMAN_HOME (default ~/.taskman)     git repository, auto-initialized
   README.md                            seed pointer written on first use
+  .lock                                flock: serializes ledger writes (gitignored)
+  .locks/<resource>.json               held resource locks (gitignored)
   <project>/
     tasks/                             the ledger (see filename grammar)
     features/                          slug.md | slug.done.md
@@ -60,6 +62,7 @@ cmd_task.go        new/start/done/reopen/defer/resume/adopt/lane
 cmd_list.go        list/next/top/projects + openProject helper
 cmd_admin.go       file/migrate/fix
 cmd_feature.go     feature new/list/done
+cmd_lock.go        lock acquire/release/heartbeat/status/steal/run
 cmd_serve.go       serve flags -> web.Serve
 
 internal/task      the ledger domain: Task, Status, Parse, Load, Find,
@@ -69,13 +72,41 @@ internal/store     where ledgers live: Home/Ensure/EnsureProject/Resolve/
                    Projects, order file (Read/Write/Prune/SortByOrder),
                    features (Load/New/SetDone), git plumbing
                    (Commit/AutoCommit with pathspec scoping + index.lock retry)
+internal/lock      machine-scoped resource locks: Acquire/Release/Heartbeat/
+                   Steal/Read/List over <home>/.locks/<resource>.json,
+                   created with link(2); no ledger, no git
 internal/web       net/http server over the store: JSON API, goldmark GFM
                    rendering, screenshot upload/serving, embedded static UI
 internal/web/static  index.html, app.css, board.js, features.js (vanilla)
 ```
 
-Dependency direction: `web -> store -> task`; the cmd layer uses all three.
-goldmark (GFM rendering) is the module's only external dependency.
+Dependency direction: `web -> store -> task`; `lock` stands alone (it knows
+the store root and nothing else); the cmd layer uses all four. goldmark (GFM
+rendering) is the module's only external dependency.
+
+## Resource locks
+
+Sibling repos run benchmark sweeps on one machine in sessions that cannot see
+each other; overlapping runs silently inflate each other's timings. The store
+root is the one path they all already share, so it hosts the mutual exclusion.
+
+A lock is one file, `<home>/.locks/<resource>.json`, created with `link(2)`
+from a fully written temp file: the kernel fails the second creator with
+`EEXIST`, and a reader never sees a partial holder. Resources are free-form
+(`local-cpu`, `ragedb-ec2`, `neptune-aws`) so runs that contend for different
+hardware never serialize -- only same-resource acquires block.
+
+The file carries a TTL and a heartbeat, so a holder killed mid-sweep frees the
+resource within its TTL instead of wedging it forever, and a random token, so a
+holder whose lock was broken cannot later release its successor's. Breaking an
+expired lock renames it aside before re-checking the token, so two acquirers
+racing to break the same dead lock cannot both believe they won.
+
+Locks are machine state, not ledger history: `.locks/` is gitignored and no
+lock operation commits. Task status cannot substitute -- the ledger is a
+multi-writer git store with no cross-process locking (which is why `taskman
+fix` exists), so a status-flag claim races exactly the way number allocation
+does.
 
 ## Data flow
 

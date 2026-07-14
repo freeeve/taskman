@@ -60,6 +60,14 @@ made along the way.
     command with stable output: `top` to pick work, `start`/`done` to move
     it, `defer -reason` to park it, `new`/`file` to create work. Sessions pin
     themselves with `TASKMAN_PROJECT` and a lane convention.
+11. **Resource locks.** `taskman lock` gives sessions that share the machine
+    but nothing else -- benchmark sweeps in sibling repos -- mutual exclusion
+    over a named resource, so overlapping runs cannot silently inflate each
+    other's timings. Locks are per-resource (runs that contend for different
+    hardware never serialize), TTL-bounded and heartbeated (a killed holder
+    frees the resource; it does not wedge it), token-checked on release (a
+    broken holder cannot drop its successor's lock), and machine state rather
+    than ledger history (gitignored, never committed).
 
 ## Non-functional requirements
 

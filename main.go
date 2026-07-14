@@ -51,6 +51,8 @@ func run(args []string) error {
 		return cmdDecisions(rest)
 	case "lane":
 		return cmdLane(rest)
+	case "lock":
+		return cmdLock(rest)
 	case "adopt":
 		return cmdAdopt(rest)
 	case "feature":
@@ -143,6 +145,22 @@ Usage:
                                free text)
   taskman decisions [-all]     tasks holding an unanswered decision; -all
                                sweeps every project in the store
+  taskman lock acquire [-ttl 45m] [-wait 30m] [-reason why] <resource>
+                               take a machine-wide lock on a contended
+                               resource (local-cpu, ragedb-ec2, ...) so
+                               concurrent sessions don't overlap on it; prints
+                               the holder token on stdout and exits non-zero if
+                               a live holder outlasts -wait
+  taskman lock run [-ttl 45m] [-wait 30m] <resource> -- <command>
+                               hold the resource for one command, heartbeating
+                               while it runs and releasing when it exits
+  taskman lock release|heartbeat [-token t] <resource>
+                               drop or refresh a lock you hold (the token
+                               defaults to $TASKMAN_LOCK_TOKEN)
+  taskman lock status [<resource>]
+                               who holds what, for how long, and why
+  taskman lock steal <resource>
+                               break a wedged holder's lock (human override)
   taskman adopt <name>         renumber a legacy prefixed cross-repo ask into the ledger
   taskman feature new <description>
                                create a feature spec in features/ (source of

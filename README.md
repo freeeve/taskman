@@ -62,6 +62,15 @@ taskman migrate [-prune] <repo-dir> [project]
                                  import a repo-local tasks/ ledger (empty
                                  project only); -prune removes the source
 taskman serve [-addr host:port]  kanban web UI, localhost only by default
+taskman lock acquire [-ttl] [-wait] [-reason why] <resource>
+                                 take a machine-wide lock on a contended
+                                 resource; non-zero exit if someone holds it
+taskman lock run [-ttl] [-wait] <resource> -- <cmd>
+                                 hold it for one command, heartbeating
+taskman lock release|heartbeat [-token t] <resource>
+                                 drop or refresh a lock you hold
+taskman lock status [<resource>] who holds what, for how long, and why
+taskman lock steal <resource>    break a wedged holder's lock (loud)
 ```
 
 All commands take `-p <project>`; mutating commands take `-no-commit`.
@@ -93,6 +102,62 @@ and a missing file means ledger order. `list` and `top` follow it; marking
 a task done prunes its number in the same commit; dragging cards in the web
 UI rewrites the file as one commit. New tasks land unlisted at the bottom
 until someone ranks them.
+
+## Resource locks
+
+Sibling repos run benchmark sweeps on one machine, in sessions that cannot see
+each other. When two sweeps overlap -- or a sweep overlaps a sibling's
+`cargo build --release` -- the timings are quietly inflated and the run still
+"succeeds" and still publishes. The store is the one thing all those sessions
+share, so it hosts the mutual exclusion.
+
+```
+taskman lock run -ttl 10m -wait 30m -reason "sweep $(git rev-parse --short HEAD)" \
+    local-cpu -- ./bench-sweep.sh
+```
+
+`run` is the shape to reach for: it acquires the resource, runs the command,
+heartbeats while it runs, releases when it exits, and exits with the command's
+status. Nothing to trap, nothing left held if the sweep panics.
+
+For a script that wants the lock across several steps, acquire it directly.
+The token printed on stdout is the proof of ownership the later release must
+present, so keep it:
+
+```sh
+TASKMAN_LOCK_TOKEN=$(taskman lock acquire -ttl 45m -wait 30m local-cpu) || exit 1
+export TASKMAN_LOCK_TOKEN
+trap 'taskman lock release local-cpu' EXIT
+```
+
+A resource is any free-form name. Give things that contend for the same
+hardware the same name, and things that do not, different ones -- a remote
+RageDB sweep is a thin client locally, so it may run alongside a native sweep,
+and forcing them through one global mutex would cost throughput without buying
+accuracy:
+
+| run | resource |
+|---|---|
+| rust / go / neo4j / kuzu, anything timed on this box | `local-cpu` |
+| the RageDB EC2 instance | `ragedb-ec2` |
+| the managed Neptune endpoint | `neptune-aws` |
+
+Locks are machine state, not ledger history: they live in a gitignored
+`.locks/` and nothing about them is committed. They carry a TTL and a
+heartbeat, so a holder that is killed mid-sweep frees the resource within the
+TTL rather than wedging it forever, and the next acquirer says loudly whose
+dead run it broke. A holder whose lock was broken cannot release its
+successor's -- the token check refuses. `taskman lock steal` is the human
+override for a holder that is wedged but not yet expired; `taskman lock status`
+says who holds what.
+
+Two caveats worth stating plainly. A lock only excludes processes that ask for
+it: an unrelated VM pinning every core will still ruin a sweep, so a caller
+still needs a pre-flight load gate and a post-flight canary on the host under
+test. And a lock cannot be built out of task status -- the ledger is a
+multi-writer git store with no cross-process locking (which is why `taskman
+fix` exists), so two sessions "claiming" a lock task would both succeed and
+both benchmark.
 
 ## Features
 

@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/freeeve/taskman/internal/lock"
 )
 
 // storeLedger pins the CLI to a fresh temp store and project via the
@@ -732,6 +734,107 @@ func TestMigrate(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(home, "pruned", "tasks", "001_only.md")); err != nil {
 		t.Errorf("explicit project name not honored: %v", err)
+	}
+}
+
+// TestLockCommands drives the resource lock end to end: one holder at a time
+// per resource, disjoint resources in parallel, a token-checked release, and a
+// loud steal -- none of it touching git, because a lock is machine state and
+// committing it would spam the store and reintroduce the very race it exists
+// to avoid.
+func TestLockCommands(t *testing.T) {
+	home, _ := storeLedger(t, "benchproj")
+	if err := run([]string{"list"}); err != nil { // initialize the store and its seed commit
+		t.Fatalf("list: %v", err)
+	}
+	commits := git(t, home, "rev-list", "--count", "HEAD")
+
+	token := strings.TrimSpace(capture(t, func() {
+		if err := run([]string{"lock", "acquire", "-ttl", "5m", "-reason", "sweep a8a13e9", "local-cpu"}); err != nil {
+			t.Fatalf("acquire: %v", err)
+		}
+	}))
+	if token == "" {
+		t.Fatal("acquire must print the holder token on stdout, for the sweep script to export")
+	}
+
+	// A second acquire on the same resource loses, and says who has it.
+	err := run([]string{"lock", "acquire", "local-cpu"})
+	if err == nil {
+		t.Fatal("two sessions acquired local-cpu at once")
+	}
+	if !strings.Contains(err.Error(), "held by benchproj") || !strings.Contains(err.Error(), "sweep a8a13e9") {
+		t.Errorf("busy error %q names neither the holder nor its reason", err)
+	}
+
+	// A different resource is not contended: a ragedb sweep is a thin client
+	// locally, so it may run while a local sweep holds the CPU.
+	if err := capture(t, func() {
+		if err := run([]string{"lock", "acquire", "ragedb-ec2"}); err != nil {
+			t.Fatalf("acquire ragedb-ec2 while local-cpu is held: %v", err)
+		}
+	}); err == "" {
+		t.Error("acquire printed no token")
+	}
+
+	status := capture(t, func() {
+		if err := run([]string{"lock", "status"}); err != nil {
+			t.Fatalf("status: %v", err)
+		}
+	})
+	for _, want := range []string{"local-cpu", "ragedb-ec2", "benchproj@", "sweep a8a13e9"} {
+		if !strings.Contains(status, want) {
+			t.Errorf("status does not mention %q:\n%s", want, status)
+		}
+	}
+
+	// Release proves ownership: the token, from the flag or the environment.
+	if err := run([]string{"lock", "release", "-token", "deadbeefdeadbeef", "local-cpu"}); err == nil {
+		t.Error("release with a wrong token succeeded")
+	}
+	t.Setenv(lock.EnvToken, token)
+	if err := run([]string{"lock", "release", "local-cpu"}); err != nil {
+		t.Fatalf("release with $%s: %v", lock.EnvToken, err)
+	}
+	if err := run([]string{"lock", "heartbeat", "local-cpu"}); err == nil {
+		t.Error("heartbeat on a released lock succeeded")
+	}
+
+	// Steal is the human override for a wedged holder.
+	if err := run([]string{"lock", "steal", "ragedb-ec2"}); err != nil {
+		t.Fatalf("steal: %v", err)
+	}
+	if out := capture(t, func() {
+		if err := run([]string{"lock", "status"}); err != nil {
+			t.Fatalf("status: %v", err)
+		}
+	}); !strings.Contains(out, "no locks held") {
+		t.Errorf("status after release and steal:\n%s", out)
+	}
+
+	// Nothing about a lock is ledger history.
+	if after := git(t, home, "rev-list", "--count", "HEAD"); after != commits {
+		t.Errorf("locking committed to the store: %s commits before, %s after", strings.TrimSpace(commits), strings.TrimSpace(after))
+	}
+	if s := git(t, home, "status", "--porcelain"); strings.Contains(s, ".locks") {
+		t.Errorf(".locks/ must be gitignored, git status shows:\n%s", s)
+	}
+}
+
+// TestLockRun holds a resource for one command and releases it after, so a
+// sweep needs no trap to clean up.
+func TestLockRun(t *testing.T) {
+	home, _ := storeLedger(t, "benchproj")
+	out := capture(t, func() {
+		if err := run([]string{"lock", "run", "-ttl", "5m", "local-cpu", "--", "echo", "swept"}); err != nil {
+			t.Fatalf("lock run: %v", err)
+		}
+	})
+	if !strings.Contains(out, "swept") {
+		t.Errorf("the command's output must pass through: %q", out)
+	}
+	if _, ok, err := lock.Read(home, "local-cpu"); err != nil || ok {
+		t.Error("lock run must release the lock when the command exits")
 	}
 }
 

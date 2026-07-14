@@ -88,6 +88,20 @@ func warnBroken(m *lock.Meta) {
 		time.Since(m.Beat).Round(time.Second))
 }
 
+// noGate is the -max-load value meaning "do not gate on load at all"; 0 has to
+// stay available to mean "require a completely idle machine".
+const noGate = -1
+
+// contaminatedExit is what a wrapped command exits with when it succeeded but
+// did not have the machine to itself. It is distinct from the command's own
+// failure codes so a sweep can tell "the run broke" from "the run is untrustworthy".
+const contaminatedExit = 3
+
+// loadSample is how often a wrapped command's machine is checked for foreign
+// work. Sweeps run for minutes; a five-second cadence is plenty to catch a
+// daemon eating a core and cheap enough to be invisible.
+const loadSample = 5 * time.Second
+
 // lockAcquire takes a resource lock, optionally waiting out a live holder.
 // The token goes to stdout alone so a sweep script can capture it
 // (TASKMAN_LOCK_TOKEN=$(taskman lock acquire local-cpu -wait 30m) || exit 1);
@@ -98,11 +112,12 @@ func lockAcquire(args []string) error {
 	wait := fs.Duration("wait", 0, "how long to wait for a live holder to release")
 	reason := fs.String("reason", "", "what the lock is being held for")
 	project := fs.String("p", "", "project recorded as the holder (default: resolved from the current directory)")
+	maxLoad := fs.Float64("max-load", noGate, "refuse to start unless other work is under this many cores (default: no gate)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	if fs.NArg() != 1 {
-		return fmt.Errorf("usage: taskman lock acquire [-ttl 45m] [-wait 30m] [-reason why] <resource>")
+		return fmt.Errorf("usage: taskman lock acquire [-ttl 45m] [-wait 30m] [-max-load 2] [-reason why] <resource>")
 	}
 	home, name, err := lockHome(*project)
 	if err != nil {
@@ -113,10 +128,34 @@ func lockAcquire(args []string) error {
 	if err != nil {
 		return err
 	}
+	if err := gate(home, held, *maxLoad, *wait); err != nil {
+		return err
+	}
 	fmt.Fprintf(os.Stderr, "acquired %s for %s (ttl %s); release with: taskman lock release -token %s %s\n",
 		held.Resource, held.Project, held.TTL(), held.Token, held.Resource)
 	fmt.Println(held.Token)
 	return nil
+}
+
+// gate holds the resource while the machine settles, and hands it back if it
+// never does. Taking the lock first is what makes the wait worth anything: it
+// stops further cooperating load, so what is left to wait out is the traffic no
+// lock can reach -- a sibling's build finishing, a VM winding down.
+//
+// A run that cannot have the machine to itself must not start, and must not sit
+// on a resource it is not using.
+func gate(home string, held lock.Meta, maxLoad float64, wait time.Duration) error {
+	if maxLoad < 0 {
+		return nil
+	}
+	err := lock.WaitForQuiet(maxLoad, wait)
+	if err == nil {
+		return nil
+	}
+	if _, rerr := lock.Release(home, held.Resource, held.Token); rerr != nil {
+		fmt.Fprintln(os.Stderr, "taskman:", rerr)
+	}
+	return err
 }
 
 // lockRelease drops a lock the caller holds.
@@ -264,6 +303,7 @@ func lockRun(args []string) error {
 	wait := fs.Duration("wait", 0, "how long to wait for a live holder to release")
 	reason := fs.String("reason", "", "what the lock is being held for")
 	project := fs.String("p", "", "project recorded as the holder (default: resolved from the current directory)")
+	maxLoad := fs.Float64("max-load", noGate, "require other work to stay under this many cores, before and during the command (default: no gate)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -272,7 +312,7 @@ func lockRun(args []string) error {
 		rest = append(rest[:1], rest[2:]...)
 	}
 	if len(rest) < 2 {
-		return fmt.Errorf("usage: taskman lock run [-ttl 45m] [-wait 30m] [-reason why] <resource> [--] <command> [args...]")
+		return fmt.Errorf("usage: taskman lock run [-ttl 45m] [-wait 30m] [-max-load 2] [-reason why] <resource> [--] <command> [args...]")
 	}
 	home, name, err := lockHome(*project)
 	if err != nil {
@@ -281,6 +321,9 @@ func lockRun(args []string) error {
 	held, broke, err := lock.Acquire(home, holder(rest[0], name, *reason, *ttl), *wait)
 	warnBroken(broke)
 	if err != nil {
+		return err
+	}
+	if err := gate(home, held, *maxLoad, *wait); err != nil {
 		return err
 	}
 	fmt.Fprintf(os.Stderr, "acquired %s for %s (ttl %s)\n", held.Resource, held.Project, held.TTL())
@@ -311,19 +354,43 @@ func lockRun(args []string) error {
 			}
 		}
 	}()
+	// Watch everything outside taskman's own process tree: the command being
+	// timed is a child of ours, so its threads are excluded and its own CPU is
+	// never mistaken for contamination.
+	watching := lock.WatchLoad(os.Getpid(), loadSample, done)
 
 	runErr := cmd.Wait()
 	close(done)
+	watch := <-watching
 	if _, err := lock.Release(home, held.Resource, held.Token); err != nil {
 		fmt.Fprintln(os.Stderr, "taskman:", err)
 	} else {
 		fmt.Fprintf(os.Stderr, "released %s (held %s)\n", held.Resource, time.Since(held.StartedAt).Round(time.Second))
 	}
+	dirty := *maxLoad >= 0 && !watch.Clean(*maxLoad)
+	if *maxLoad >= 0 {
+		if dirty {
+			fmt.Fprintf(os.Stderr, "taskman: %s did NOT have the machine to itself: %s, over the %.1f cores allowed\n",
+				held.Resource, watch.Summary(), *maxLoad)
+			fmt.Fprintln(os.Stderr, "taskman: these timings are not trustworthy -- do not publish them")
+		} else {
+			fmt.Fprintf(os.Stderr, "%s ran on a quiet machine (%s)\n", held.Resource, watch.Summary())
+		}
+	}
 	var exit *exec.ExitError
 	if errors.As(runErr, &exit) {
 		os.Exit(exit.ExitCode())
 	}
-	return runErr
+	if runErr != nil {
+		return runErr
+	}
+	if dirty {
+		// The command succeeded, so its own status cannot carry this: exit
+		// non-zero anyway, on a code of our own, so `... || exit 1` in a sweep
+		// refuses to publish a run the machine spoiled.
+		os.Exit(contaminatedExit)
+	}
+	return nil
 }
 
 // beat refreshes the lock until done closes. It heartbeats at a third of the

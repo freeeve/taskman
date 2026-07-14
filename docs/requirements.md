@@ -68,6 +68,14 @@ made along the way.
     frees the resource; it does not wedge it), token-checked on release (a
     broken holder cannot drop its successor's lock), and machine state rather
     than ledger history (gitignored, never committed).
+12. **Load gating.** Exclusion is necessary and not sufficient: the load that
+    ruins a measurement mostly comes from processes that never ask for a lock.
+    `-max-load` refuses to start a timed run while other work exceeds a ceiling
+    (naming the offenders), and watches for the whole run, exiting non-zero when
+    a command succeeded on a machine it did not have to itself -- so a
+    contaminated sweep cannot publish. Load is counted in cores of work foreign
+    to the timed command, never total load, which the command's own threads
+    would dominate.
 
 ## Non-functional requirements
 

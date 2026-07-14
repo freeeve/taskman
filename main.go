@@ -145,15 +145,21 @@ Usage:
                                free text)
   taskman decisions [-all]     tasks holding an unanswered decision; -all
                                sweeps every project in the store
-  taskman lock acquire [-ttl 45m] [-wait 30m] [-reason why] <resource>
+  taskman lock acquire [-ttl 45m] [-wait 30m] [-max-load 2] [-reason why] <resource>
                                take a machine-wide lock on a contended
                                resource (local-cpu, ragedb-ec2, ...) so
                                concurrent sessions don't overlap on it; prints
                                the holder token on stdout and exits non-zero if
                                a live holder outlasts -wait
-  taskman lock run [-ttl 45m] [-wait 30m] <resource> -- <command>
+  taskman lock run [-ttl 45m] [-wait 30m] [-max-load 2] <resource> -- <command>
                                hold the resource for one command, heartbeating
                                while it runs and releasing when it exits
+                               -max-load gates a timed run on how busy the
+                               machine is, since a lock only excludes the
+                               processes that ask for one: it refuses to start
+                               while other work exceeds that many cores, and
+                               exits 3 if the command succeeded on a machine it
+                               did not have to itself
   taskman lock release|heartbeat [-token t] <resource>
                                drop or refresh a lock you hold (the token
                                defaults to $TASKMAN_LOCK_TOKEN)

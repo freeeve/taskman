@@ -109,10 +109,31 @@ every session shares) and names a resource rather than a repo. One global
 `bench` mutex would serialize a remote RageDB sweep behind a local Rust sweep,
 which contend for nothing -- costing throughput without buying accuracy.
 
-**A lock only excludes cooperating processes.** `taskman lock` cannot stop an
-unrelated VM from saturating the machine, so a caller still needs a pre-flight
-load gate and a post-flight canary on the host under test. Taskman owns mutual
-exclusion; it does not own load measurement.
+**A lock only excludes cooperating processes, so exclusion alone is not
+enough.** This was first left to the harnesses -- taskman owns mutual exclusion,
+not load measurement -- and that split failed in practice: sweeps took the lock
+correctly and were still timed on a machine at load 11, because the load came
+from a daemon, a VM, and a sibling's release build, none of which will ever call
+`acquire`. So `-max-load` moved into `taskman lock` itself: one gate every repo
+inherits, rather than three harnesses each meant to write their own and none of
+them doing it. Holding the lock now means what a caller always assumed it meant.
+
+**Load is measured in foreign cores, not the load average.** A twelve-thread
+benchmark drives load1 to twelve by design, so a total-load threshold cannot
+distinguish "the machine is busy" from "my benchmark is working". Taskman sums
+the CPU of every process outside its own tree, which excludes the timed command
+and taskman itself, and states the result in cores. The pre-flight gate and the
+in-flight watch then speak one unit, and the number means the same thing before
+and during the run. The in-flight verdict rests on the mean rather than the
+peak: a five-second compile blipping through a forty-minute sweep is noise, a
+daemon holding a core throughout is not.
+
+**A contaminated run exits non-zero even when the command succeeded.** The
+timings are the product, and untrustworthy timings that exit 0 get published --
+that is precisely how bad numbers reached the live site. `lock run` exits 3 when
+the command succeeded on a machine it did not have to itself, so an ordinary
+`|| exit 1` in a sweep script refuses to publish. The command's own failure code
+still wins when it fails.
 
 ## Assumptions
 

@@ -112,13 +112,57 @@ each other. When two sweeps overlap -- or a sweep overlaps a sibling's
 share, so it hosts the mutual exclusion.
 
 ```
-taskman lock run -ttl 10m -wait 30m -reason "sweep $(git rev-parse --short HEAD)" \
-    local-cpu -- ./bench-sweep.sh
+taskman lock run -ttl 10m -wait 30m -max-load 2 \
+    -reason "sweep $(git rev-parse --short HEAD)" local-cpu -- ./bench-sweep.sh
 ```
 
 `run` is the shape to reach for: it acquires the resource, runs the command,
 heartbeats while it runs, releases when it exits, and exits with the command's
 status. Nothing to trap, nothing left held if the sweep panics.
+
+## The lock is not the whole story: -max-load
+
+A lock only excludes processes that *ask* for it. A daemon eating a core, a VM,
+a sibling's `cargo build --release` -- none of them will ever call `acquire`, and
+they are what actually ruin a measurement. A run can hold `local-cpu` and still
+be timed on a machine at load 11.
+
+So a timed run should also state how quiet a machine it needs:
+
+```
+-max-load 2      # start only if other work is under 2 cores, and keep it there
+```
+
+`-max-load` is enforced twice. **Before** the command starts, taskman takes the
+resource (which stops any *cooperating* load) and then waits out the rest, up to
+`-wait`; if the machine never settles it hands the lock back and exits non-zero,
+naming who is holding the CPU:
+
+```
+taskman: machine is busy: 6.1 cores of other work, over the 2.0 allowed (waited 30s for it to settle)
+  pebble_updater (pid 87881, 0.8 cores)
+  rustc (pid 73673, 0.9 cores)
+```
+
+**During** the command, it keeps sampling. If the run averaged more foreign work
+than the ceiling, `run` says so and exits **3** even though the command itself
+succeeded -- so an ordinary `|| exit 1` refuses to publish a spoiled sweep:
+
+```
+taskman: local-cpu did NOT have the machine to itself: 3.7 cores of other work on
+average, 4.6 at peak, worst: rustc (pid 94346, 1.0 cores), over the 2.5 allowed
+taskman: these timings are not trustworthy -- do not publish them
+```
+
+Load is counted in **cores of work foreign to the command** -- everything outside
+taskman's own process tree. A twelve-thread benchmark drives the load average to
+twelve by design, so total load says nothing about whether a run had the machine
+to itself; foreign load says exactly that. The verdict rests on the mean, not the
+peak, so a brief compile blipping through a long sweep is noise while a daemon
+holding a core throughout is not.
+
+Without `-max-load` there is no gate at all: `lock run` is then pure exclusion,
+which is the right thing for a build that merely must not disturb others.
 
 For a script that wants the lock across several steps, acquire it directly.
 The token printed on stdout is the proof of ownership the later release must
@@ -151,13 +195,16 @@ successor's -- the token check refuses. `taskman lock steal` is the human
 override for a holder that is wedged but not yet expired; `taskman lock status`
 says who holds what.
 
-Two caveats worth stating plainly. A lock only excludes processes that ask for
-it: an unrelated VM pinning every core will still ruin a sweep, so a caller
-still needs a pre-flight load gate and a post-flight canary on the host under
-test. And a lock cannot be built out of task status -- the ledger is a
-multi-writer git store with no cross-process locking (which is why `taskman
-fix` exists), so two sessions "claiming" a lock task would both succeed and
-both benchmark.
+One caveat worth stating plainly: a lock cannot be built out of task status.
+The ledger is a multi-writer git store with no cross-process locking (which is
+why `taskman fix` exists), so two sessions "claiming" a lock task would both
+succeed and both benchmark. Exclusion needs an atomic primitive, which is what
+`link(2)` into `.locks/` is.
+
+Locks are machine-scoped, so `-max-load` measures *this* box. A run against a
+remote engine (`ragedb-ec2`, `neptune-aws`) is a thin client locally: gate it on
+the load of the host under test, over ssh, and confirm the result against a
+known-clean band before publishing. Taskman cannot see that machine.
 
 ## Features
 

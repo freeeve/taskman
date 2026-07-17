@@ -144,6 +144,43 @@ test("wide content in the dialog body scrolls and external links open in a new t
   await finishTask(page.request, t.num);
 });
 
+test("table columns size to content: numbers and headers never break mid-word (task 131)", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-table-cols"));
+  // A benchmark-style table: narrow numeric columns next to a long prose
+  // column. The .md word-breaking must not reach the cells, or the layout
+  // squeezes the numeric columns to one character wide and shreds "54321"
+  // vertically while the prose column hogs the width.
+  const note =
+    "typed top-k over members; residual = parallel fold per-chunk window maps, " +
+    "structural and unlikely to shrink without a kernel rewrite";
+  appendTaskBody(
+    t.file,
+    `\n## bench\n\n| Query | Baseline | Current | Note |\n| --- | --- | --- | --- |\n| Q2 | 54321 | 3683 | ${note} |\n`
+  );
+
+  await gotoBoard(page);
+  await openCard(page, t.num);
+  await expect(page.locator("#dialog-body table")).toBeVisible();
+
+  const lineCounts = await page.evaluate(() => {
+    const boxes = (el: Element) => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getClientRects().length;
+    };
+    const cells = [...document.querySelectorAll("#dialog-body table th, #dialog-body table td")];
+    const of = (text: string) => boxes(cells.find((el) => el.textContent!.trim() === text)!);
+    return { baseline: of("Baseline"), number: of("54321") };
+  });
+  expect(lineCounts.baseline, "header broke mid-word").toBe(1);
+  expect(lineCounts.number, "numeric cell broke mid-word").toBe(1);
+
+  await finishTask(page.request, t.num);
+});
+
 test("closing the dialog collapses it so neither view is obscured", async ({ page }) => {
   const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-close"));
   await gotoBoard(page);

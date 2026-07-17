@@ -375,7 +375,12 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
   overflow-x: auto;
   max-width: 100%;
 }
-.md th, .md td { border: 1px solid var(--border); padding: 4px 8px; }
+/* Cells opt back out of .md's overflow-wrap:anywhere: `anywhere` gives every
+   column a one-character min-content width, so a squeezed table shreds numbers
+   and headers vertically instead of sizing columns to their longest word.
+   With normal wrapping, prose columns still wrap at word boundaries and a
+   genuinely too-wide table falls back to the scroll box above. */
+.md th, .md td { border: 1px solid var(--border); padding: 4px 8px; overflow-wrap: normal; }
 .md a { color: var(--accent); }
 
 .picker { position: relative; }

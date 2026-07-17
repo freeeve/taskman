@@ -187,6 +187,35 @@ test("a stale project in localStorage falls back to a real project and still loa
   await expect(page.locator("#features .features-bar")).toBeVisible();
 });
 
+test("regaining focus refreshes the counts in the button and the open picker (task 130)", async ({
+  page,
+}) => {
+  // Project counts come from /api/projects, which only boot fetched before;
+  // the focus refetch must cover it too, or another session's work leaves the
+  // button and picker rows stale while the board itself updates.
+  await gotoBoard(page);
+  const label = await page.locator("#project-button").textContent();
+  const before = Number(label!.match(/\((\d+)\)/)![1]);
+
+  const t = await createTaskViaAPI(page.request, uniqueDesc("picker-count"));
+
+  // Leave the picker open across the refresh -- its rows must re-render too.
+  await openPicker(page);
+  await page.locator("#picker-search").fill(PROJECT);
+  await expect(page.locator("#picker-list li")).toHaveCount(1);
+  await expect(page.locator("#picker-list li .counts")).toContainText(`${before} open`);
+
+  await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/api/projects")),
+    page.evaluate(() => window.dispatchEvent(new Event("focus"))),
+  ]);
+
+  await expect(page.locator("#project-button")).toContainText(`(${before + 1})`);
+  await expect(page.locator("#picker-list li .counts")).toContainText(`${before + 1} open`);
+
+  await finishTask(page.request, t.num);
+});
+
 test("ctrl+k is ignored while the task dialog is open, and does not leave the picker stuck open", async ({
   page,
 }) => {

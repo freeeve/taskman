@@ -974,6 +974,8 @@ async function refreshStale() {
   const active = document.activeElement;
   const num = active && active.dataset ? active.dataset.num : null;
   const y = window.scrollY;
+  await loadProjects().catch(showError);
+  if (!$("#picker-panel").hidden) renderPicker();
   await loadTasks().catch(showError);
   if (typeof featuresVisible !== "undefined" && featuresVisible) {
     await loadFeatures().catch(showError);

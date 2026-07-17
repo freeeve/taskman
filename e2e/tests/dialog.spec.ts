@@ -181,6 +181,59 @@ test("table columns size to content: numbers and headers never break mid-word (t
   await finishTask(page.request, t.num);
 });
 
+test("focus refreshes an open view-mode dialog and the board behind it (task 132)", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-focus"));
+  await gotoBoard(page);
+  await openCard(page, t.num);
+  await expect(page.locator("#dialog-body")).not.toContainText("out-of-band paragraph");
+
+  // Out-of-band writers while this tab shows a stale snapshot: another
+  // session appends to the open task's body and creates a sibling task.
+  appendTaskBody(t.file, "\n## fresh\n\nout-of-band paragraph\n");
+  const sibling = await createTaskViaAPI(page.request, uniqueDesc("dialog-focus-sib"));
+  await expect(page.locator(`.card[data-num="${sibling.num}"]`)).toHaveCount(0);
+
+  await Promise.all([
+    page.waitForResponse((r) => r.url().includes(`/tasks/${t.num}`)),
+    page.evaluate(() => window.dispatchEvent(new Event("focus"))),
+  ]);
+
+  // The dialog stays open, its body freshens in place, and the board behind
+  // picked up the sibling -- no reload, no close/reopen.
+  await expect(page.locator("#task-dialog")).toBeVisible();
+  await expect(page.locator("#dialog-body")).toContainText("out-of-band paragraph");
+  await expect(page.locator(`.card[data-num="${sibling.num}"]`)).toHaveCount(1);
+
+  await finishTask(page.request, t.num);
+  await finishTask(page.request, sibling.num);
+});
+
+test("focus refresh never destroys an open editor's typed text (task 132)", async ({ page }) => {
+  const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-focus-edit"));
+  await gotoBoard(page);
+  await openCard(page, t.num);
+  await page.locator("#dialog-actions button", { hasText: "edit" }).click();
+  await expect(page.locator("#edit-body")).toBeVisible();
+  await page.locator("#edit-body").fill("typed but not saved");
+
+  // The views behind still refetch on focus; the dialog holding typed input
+  // must be left untouched.
+  await Promise.all([
+    page.waitForResponse((r) => r.url().endsWith("/api/projects")),
+    page.evaluate(() => window.dispatchEvent(new Event("focus"))),
+  ]);
+
+  await expect(page.locator("#edit-body")).toHaveValue("typed but not saved");
+
+  await page.locator("#dialog-actions button", { hasText: "cancel" }).click();
+  await expect(page.locator("#edit-body")).toHaveCount(0);
+  await page.locator("#dialog-close").click();
+  await finishTask(page.request, t.num);
+});
+
 test("closing the dialog collapses it so neither view is obscured", async ({ page }) => {
   const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-close"));
   await gotoBoard(page);

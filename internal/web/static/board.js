@@ -493,13 +493,10 @@ function render() {
   }
 }
 
-async function openTask(key) {
-  // Direct opens (cards, chips, search) drop any decisions-view return
-  // marker; router-driven opens keep it, since a decisions row travels
-  // through a hash change to get here.
-  if (typeof applyingHash === "undefined" || !applyingHash) {
-    state.decisionsReturn = null;
-  }
+// renderTask (re)loads a task into the dialog chrome without touching the
+// dialog's open state: openTask adds the modal open; the focus refresh
+// reuses it to freshen an already-open dialog in place.
+async function renderTask(key) {
   const data = await api(`/api/projects/${state.project}/tasks/${key}`);
   // The dialog tracks the resolved number, not the lookup key: stems open
   // duplicate-numbered tasks, but hash sync and focus want the number.
@@ -509,6 +506,16 @@ async function openTask(key) {
   $("#dialog-body").innerHTML = data.html;
   if (data.decision) renderDecision(data.task, data.decision);
   renderActions(data.task);
+}
+
+async function openTask(key) {
+  // Direct opens (cards, chips, search) drop any decisions-view return
+  // marker; router-driven opens keep it, since a decisions row travels
+  // through a hash change to get here.
+  if (typeof applyingHash === "undefined" || !applyingHash) {
+    state.decisionsReturn = null;
+  }
+  await renderTask(key);
   $("#task-dialog").showModal();
 }
 
@@ -927,6 +934,15 @@ function dialogDirty() {
   return false;
 }
 
+// dialogHoldsInput reports whether the open dialog carries typed input a
+// re-render would destroy: an edit-mode session (even a clean editor keeps
+// its caret and scroll) or text in a decision's free-form "other" field.
+function dialogHoldsInput() {
+  if ($("#edit-body")) return true;
+  const other = document.querySelector("#task-dialog .decision-other input");
+  return !!(other && other.value.trim());
+}
+
 // confirmDiscard gates the accidental close paths; save and the explicit
 // cancel button close without asking.
 function confirmDiscard() {
@@ -955,9 +971,12 @@ function wireLightDismiss() {
 
 // --- external-change freshness: the store is multi-writer (CLI and other
 // sessions commit too), so an open tab refetches when it regains focus.
-// One refetch per transition (focus + visibilitychange fire together), and
-// never under an open dialog -- the refresh runs on its close instead.
-// Scroll, open spec panels (renderFeatures), and a focused card survive.
+// One refetch per transition (focus + visibilitychange fire together). An
+// open dialog freshens in place along with the views behind it, unless it
+// holds typed input (the editor, a decision's "other" text) -- that dialog
+// is left untouched and refreshes on close instead, so a refetch can never
+// destroy what the user typed. Scroll, open spec panels (renderFeatures),
+// and a focused card survive.
 let refreshQueued = false;
 let refreshOnDialogClose = false;
 
@@ -968,8 +987,15 @@ async function refreshStale() {
     refreshQueued = false;
   }, 300);
   if ($("#task-dialog").open) {
-    refreshOnDialogClose = true;
-    return;
+    if (dialogHoldsInput() || state.dialogTask == null) {
+      refreshOnDialogClose = true;
+    } else {
+      await renderTask(state.dialogTask).catch(() => {
+        // The task may be gone or ambiguous now; keep the rendered snapshot
+        // and let the close-time refresh reconcile the board.
+        refreshOnDialogClose = true;
+      });
+    }
   }
   const active = document.activeElement;
   const num = active && active.dataset ? active.dataset.num : null;

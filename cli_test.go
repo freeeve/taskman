@@ -275,6 +275,104 @@ func TestLanes(t *testing.T) {
 	}
 }
 
+// withStdin runs fn with os.Stdin backed by a pipe carrying content, so a
+// command reading `-body -` / `-append -` sees it.
+func withStdin(t *testing.T, content string, fn func()) {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := w.WriteString(content); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	saved := os.Stdin
+	os.Stdin = r
+	defer func() { os.Stdin = saved }()
+	fn()
+}
+
+// TestShowAndUpdate drives editing a task through the CLI instead of the store
+// file: show prints the raw body, update replaces / appends / retitles and
+// commits, and the status-suffixed filename is never touched by hand.
+func TestShowAndUpdate(t *testing.T) {
+	home, dir := storeLedger(t, "editproj")
+
+	if err := run([]string{"new", "Draft the plan"}); err != nil {
+		t.Fatalf("new: %v", err)
+	}
+	orig := filepath.Join(dir, "001_draft-the-plan.md")
+
+	// show prints the raw body; -path prints the file path.
+	out := capture(t, func() { _ = run([]string{"show", "1"}) })
+	if !strings.Contains(out, "# 001 -- Draft the plan") {
+		t.Errorf("show body:\n%s", out)
+	}
+	out = capture(t, func() { _ = run([]string{"show", "-path", "draft"}) })
+	if strings.TrimSpace(out) != orig {
+		t.Errorf("show -path = %q, want %q", strings.TrimSpace(out), orig)
+	}
+
+	// -append adds to the end without a heading; the caller supplies markup.
+	if err := run([]string{"update", "-append", "## Outcome\n\nShipped it.", "1"}); err != nil {
+		t.Fatalf("update -append: %v", err)
+	}
+	body, _ := os.ReadFile(orig)
+	if !strings.Contains(string(body), "# 001 -- Draft the plan") || !strings.HasSuffix(string(body), "## Outcome\n\nShipped it.\n") {
+		t.Errorf("after append:\n%s", body)
+	}
+
+	// -body - replaces the whole body from stdin, normalized to one trailing
+	// newline.
+	withStdin(t, "# 001 -- Draft the plan\n\nRewritten body.\n\n\n", func() {
+		if err := run([]string{"update", "-body", "-", "1"}); err != nil {
+			t.Fatalf("update -body -: %v", err)
+		}
+	})
+	body, _ = os.ReadFile(orig)
+	if string(body) != "# 001 -- Draft the plan\n\nRewritten body.\n" {
+		t.Errorf("after body replace:\n%q", string(body))
+	}
+
+	// -title restamps the H1 and renames the slug, keeping the number.
+	if err := run([]string{"update", "-title", "Ship the plan", "1"}); err != nil {
+		t.Fatalf("update -title: %v", err)
+	}
+	renamed := filepath.Join(dir, "001_ship-the-plan.md")
+	body, err := os.ReadFile(renamed)
+	if err != nil {
+		t.Fatalf("renamed file: %v", err)
+	}
+	if !strings.HasPrefix(string(body), "# 001 -- Ship the plan\n") {
+		t.Errorf("retitled H1:\n%s", body)
+	}
+	if _, err := os.Stat(orig); !os.IsNotExist(err) {
+		t.Errorf("old slug file still present after retitle")
+	}
+
+	// Guards: nothing to do, both replace and append, and a blank body.
+	if err := run([]string{"update", "1"}); err == nil {
+		t.Error("update with no edit flag should error")
+	}
+	if err := run([]string{"update", "-body", "x", "-append", "y", "1"}); err == nil {
+		t.Error("update with both -body and -append should error")
+	}
+	withStdin(t, "   \n", func() {
+		if err := run([]string{"update", "-body", "-", "1"}); err == nil {
+			t.Error("update -body - with blank stdin should refuse to blank the task")
+		}
+	})
+
+	// Each successful update committed under the project-scoped message.
+	if log := git(t, home, "log", "--format=%s"); !strings.Contains(log, "chore(editproj): update 001_ship-the-plan") ||
+		!strings.Contains(log, "chore(editproj): update 001_draft-the-plan") {
+		t.Errorf("update commits:\n%s", log)
+	}
+}
+
 // TestFeatures drives the feature CLI: template creation, the rollup against
 // the ledger, hiding shipped features, and the done rename.
 func TestFeatures(t *testing.T) {

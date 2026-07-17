@@ -347,6 +347,26 @@ func AppendSection(path, heading, body string) error {
 	return os.WriteFile(path, []byte(out), 0o644)
 }
 
+// SetBody replaces a task file's whole content with body, normalizing to a
+// single trailing newline -- the same shape the web editor writes, so a
+// round-trip through show/update leaves no spurious diff.
+func SetBody(path, body string) error {
+	return os.WriteFile(path, []byte(strings.TrimRight(body, "\n")+"\n"), 0o644)
+}
+
+// AppendRaw appends text to the end of a task file, separated from the
+// existing content by a blank line. Unlike AppendSection it adds no heading,
+// so the caller controls the markup (an Outcome section, a note, a checklist
+// item).
+func AppendRaw(path, text string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	out := strings.TrimRight(string(data), "\n") + "\n\n" + strings.Trim(text, "\n") + "\n"
+	return os.WriteFile(path, []byte(out), 0o644)
+}
+
 // titleNumRE matches an H1 that already leads with a task number, tolerating
 // the separator variants found in older ledgers: --, em/en dash, or a spaced
 // hyphen. A bare unspaced hyphen is deliberately NOT a separator so titles

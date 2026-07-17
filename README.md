@@ -41,6 +41,11 @@ taskman next                     next free task number
 taskman top [-lane L]            highest-priority pending task -- what to
                                  pick up ("next is a number, top is a task")
 taskman new [-lane L] <desc>     create the next numbered pending task
+taskman show [-path] <n|slug>    print a task's raw body (-path: its file path)
+taskman update (-title <t> | -body <md>|- | -append <md>|-) <n|slug>
+                                 edit a task in place and commit it, so the
+                                 store file is never hand-edited; -body/-append
+                                 read stdin when given "-"
 taskman start <n|slug>           mark in-progress   (rename)
 taskman done <n|slug>            mark done          (rename; prunes order)
 taskman reopen <n|slug>          back to pending    (rename)
@@ -296,8 +301,11 @@ Tasks live in the central taskman store (~/.taskman), one dir per project;
 the project resolves from the enclosing repo's basename (pin long sessions
 with TASKMAN_PROJECT). Sessions with a role use a lane (impl | e2e | ...).
 - Pick work: `taskman top -lane <lane>`, then `taskman start <n>` ->
-  work -> semantic commit(s) in the code repo -> append an Outcome section
-  to the task file -> `taskman done <n>` (commits outcome + rename together).
+  work -> semantic commit(s) in the code repo -> `taskman update -append`
+  an Outcome section onto the task -> `taskman done <n>` (commits outcome +
+  rename together). Read a task with `taskman show <n>` and edit it with
+  `taskman update` rather than opening the store file -- the CLI resolves the
+  status-suffixed name, writes under the store lock, and commits for you.
 - New work: `taskman new -lane <lane> <desc>`. Ask another project:
   `taskman file <project> <desc>` -- a BARE project name, never a path.
 - Use the taskman CLI for ALL ledger chores; never rename task files by

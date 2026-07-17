@@ -37,6 +37,10 @@ func run(args []string) error {
 		return cmdTop(rest)
 	case "new":
 		return cmdNew(rest)
+	case "show", "cat":
+		return cmdShow(rest)
+	case "update", "edit":
+		return cmdUpdate(rest)
 	case "start":
 		return cmdStatus(rest, task.InProgress)
 	case "done":
@@ -127,6 +131,15 @@ Usage:
   taskman new [-lane L] <description>
                                create the next numbered pending task; the lane
                                token routes it to a session or submodule
+  taskman show [-path] <n|slug>
+                               print a task's raw markdown body (-path prints
+                               its file path instead); the read half of
+                               editing without touching the store file
+  taskman update (-title <t> | -body <md>|- | -append <md>|-) <n|slug>
+                               edit a task in place and commit it: -title
+                               restamps the H1 and renames the slug, -body
+                               replaces the whole body, -append adds to the
+                               end; -body/-append read stdin when given "-"
   taskman lane <n|slug> <lane|->
                                set or clear a task's lane (rename)
   taskman start <n|slug>       mark in-progress

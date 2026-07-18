@@ -414,7 +414,12 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusNotFound, err)
 		return
 	}
-	t, err := findByKey(projDir, r.PathValue("n"))
+	tasks, _, err := loadTasks(projDir)
+	if err != nil {
+		writeErr(w, http.StatusInternalServerError, err)
+		return
+	}
+	t, err := task.Find(tasks, r.PathValue("n"))
 	if err != nil {
 		writeErr(w, http.StatusNotFound, err)
 		return
@@ -427,7 +432,7 @@ func (s *server) taskDetail(w http.ResponseWriter, r *http.Request) {
 	// Decision blocks are storage format: the live one renders as the
 	// interactive widget instead, answered ones as readable summaries. The
 	// raw body field stays exact for agents and the editor.
-	rendered, err := renderBody([]byte(task.PresentDecisions(string(body))), r.PathValue("p"))
+	rendered, err := renderBody([]byte(task.PresentDecisions(string(body))), r.PathValue("p"), taskNumSet(tasks))
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -468,13 +473,86 @@ func bodyEtag(data []byte) string {
 }
 
 // renderBody converts markdown to html with the store-specific rewrites
-// applied; both task bodies and feature specs render through here.
-func renderBody(body []byte, project string) (string, error) {
+// applied; both task bodies and feature specs render through here. refs is the
+// set of task numbers that exist in the project: same-project "task NNN"
+// references to one of them become links that open it (nil disables that, e.g.
+// for search-result snippets).
+func renderBody(body []byte, project string, refs map[int]bool) (string, error) {
 	var html bytes.Buffer
 	if err := markdown.Convert(body, &html); err != nil {
 		return "", err
 	}
-	return rewriteLinks(rewriteShots(html.String(), project)), nil
+	return rewriteTaskRefs(rewriteLinks(rewriteShots(html.String(), project)), project, refs), nil
+}
+
+// taskRefRE matches an inline same-project task reference ("task 174", any
+// case, any zero-padding). Cross-project references carry a project prefix
+// ("ragedb 064", "rcp-397") and never match, so they stay plain text.
+var taskRefRE = regexp.MustCompile(`(?i)\btask\s+0*(\d{1,4})\b`)
+
+// rewriteTaskRefs turns "task NNN" references to existing tasks into hash
+// links the board's router opens in place (#/p/<project>/task/<n>). It scans
+// tag by tag so replacements land only in visible text -- never inside an
+// attribute -- and skips the contents of anchors, code, and pre, where a
+// reference is either already a link or meant to be read literally.
+func rewriteTaskRefs(html, project string, refs map[int]bool) string {
+	if len(refs) == 0 {
+		return html
+	}
+	var b strings.Builder
+	skip := 0
+	for i := 0; i < len(html); {
+		lt := strings.IndexByte(html[i:], '<')
+		if lt < 0 {
+			b.WriteString(linkRefs(html[i:], project, refs, skip > 0))
+			break
+		}
+		b.WriteString(linkRefs(html[i:i+lt], project, refs, skip > 0))
+		gt := strings.IndexByte(html[i+lt:], '>')
+		if gt < 0 {
+			b.WriteString(html[i+lt:])
+			break
+		}
+		tag := html[i+lt : i+lt+gt+1]
+		b.WriteString(tag)
+		switch low := strings.ToLower(tag); {
+		case strings.HasPrefix(low, "<a") || strings.HasPrefix(low, "<code") || strings.HasPrefix(low, "<pre"):
+			skip++
+		case strings.HasPrefix(low, "</a") || strings.HasPrefix(low, "</code") || strings.HasPrefix(low, "</pre"):
+			if skip > 0 {
+				skip--
+			}
+		}
+		i += lt + gt + 1
+	}
+	return b.String()
+}
+
+// linkRefs wraps each in-project task reference in a hash link, unless this
+// run of text is inside an element where references are left alone.
+func linkRefs(text, project string, refs map[int]bool, skip bool) string {
+	if skip || !strings.Contains(strings.ToLower(text), "task ") {
+		return text
+	}
+	return taskRefRE.ReplaceAllStringFunc(text, func(m string) string {
+		n, _ := strconv.Atoi(taskRefRE.FindStringSubmatch(m)[1])
+		if !refs[n] {
+			return m
+		}
+		return fmt.Sprintf(`<a class="task-ref" href="#/p/%s/task/%d">%s</a>`, project, n, m)
+	})
+}
+
+// taskNumSet collects the numbers of tasks that exist, the set of references
+// rewriteTaskRefs will link.
+func taskNumSet(tasks []task.Task) map[int]bool {
+	m := make(map[int]bool, len(tasks))
+	for _, t := range tasks {
+		if t.HasNum {
+			m[t.Num] = true
+		}
+	}
+	return m
 }
 
 // featureDetail returns one feature with its raw body (for the editor) and
@@ -495,7 +573,11 @@ func (s *server) featureDetail(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
 	}
-	rendered, err := renderBody(body, r.PathValue("p"))
+	var refs map[int]bool
+	if tasks, _, err := loadTasks(projDir); err == nil {
+		refs = taskNumSet(tasks)
+	}
+	rendered, err := renderBody(body, r.PathValue("p"), refs)
 	if err != nil {
 		writeErr(w, http.StatusInternalServerError, err)
 		return
@@ -541,10 +623,11 @@ func (s *server) features(w http.ResponseWriter, r *http.Request) {
 		Tasks []chip `json:"tasks"`
 	}
 	out := []featJSON{}
+	refs := taskNumSet(tasks)
 	for _, f := range feats {
 		fj := featJSON{Slug: f.Slug, Done: f.Done, Title: f.Title, Tasks: []chip{}}
 		if body, err := os.ReadFile(f.Path()); err == nil {
-			if rendered, err := renderBody(body, r.PathValue("p")); err == nil {
+			if rendered, err := renderBody(body, r.PathValue("p"), refs); err == nil {
 				fj.HTML = rendered
 			}
 		}

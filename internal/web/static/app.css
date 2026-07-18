@@ -382,6 +382,9 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
    genuinely too-wide table falls back to the scroll box above. */
 .md th, .md td { border: 1px solid var(--border); padding: 4px 8px; overflow-wrap: normal; }
 .md a { color: var(--accent); }
+/* Same-project task references open in place; a dotted underline sets them
+   apart from outbound links without shouting. */
+.md a.task-ref { text-decoration-style: dotted; }
 
 .picker { position: relative; }
 

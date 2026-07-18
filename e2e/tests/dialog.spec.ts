@@ -234,6 +234,37 @@ test("focus refresh never destroys an open editor's typed text (task 132)", asyn
   await finishTask(page.request, t.num);
 });
 
+test("a task-number reference renders as a link that opens that task (task 137)", async ({
+  page,
+}) => {
+  test.skip(!storeIsLocal(), "store is not local to the test runner");
+  // referrer's body points at an existing task by number and at a number no
+  // task has; only the first should become a clickable in-place link.
+  const target = await createTaskViaAPI(page.request, uniqueDesc("ref-target"));
+  const referrer = await createTaskViaAPI(page.request, uniqueDesc("ref-source"));
+  appendTaskBody(
+    referrer.file,
+    `\n## links\n\nBlocked by task ${target.num}; unrelated to task 999999.\n`
+  );
+
+  await gotoBoard(page);
+  await openCard(page, referrer.num);
+
+  const link = page.locator(`#dialog-body a.task-ref[href$="/task/${target.num}"]`);
+  await expect(link).toHaveText(`task ${target.num}`);
+  // The missing number stays plain text -- no dead links.
+  await expect(page.locator("#dialog-body")).toContainText("task 999999");
+  await expect(page.locator('#dialog-body a.task-ref[href$="/task/999999"]')).toHaveCount(0);
+
+  // Clicking it re-drives the dialog to the referenced task in place.
+  await link.click();
+  await expect(page.locator("#dialog-file")).toContainText(target.file);
+  await expect(page).toHaveURL(new RegExp(`/task/${target.num}$`));
+
+  await finishTask(page.request, target.num);
+  await finishTask(page.request, referrer.num);
+});
+
 test("closing the dialog collapses it so neither view is obscured", async ({ page }) => {
   const t = await createTaskViaAPI(page.request, uniqueDesc("dialog-close"));
   await gotoBoard(page);

@@ -185,6 +185,14 @@ Usage:
                                create a feature spec in features/ (source of
                                truth for what the product should do)
   taskman feature list [-all]  features with a done-task rollup
+  taskman feature show [-path] <slug>
+                               print a feature spec's raw markdown (-path
+                               prints its file path instead)
+  taskman feature update (-body <md>|- | -append <md>|- | -tasks <nums>) <slug>
+                               edit a spec in place and commit it: -body
+                               replaces, -append adds to the end, -tasks
+                               rewrites the linking "Tasks:" line ("" clears);
+                               -body/-append read stdin on "-"
   taskman feature done <slug>  mark a feature shipped
   taskman feature reopen <slug>
                                un-ship a feature (back to active)

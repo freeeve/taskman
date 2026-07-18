@@ -57,6 +57,11 @@ taskman resume <n|slug>          lift a deferral, restoring the status under it
 taskman adopt <name>             renumber a legacy prefixed ask into the ledger
 taskman feature new <desc>       create a feature spec in features/
 taskman feature list [-all]      features with a done-task rollup
+taskman feature show [-path] <slug>
+                                 print a spec's raw body (-path: its file path)
+taskman feature update (-body <md>|- | -append <md>|- | -tasks <nums>) <slug>
+                                 edit a spec in place and commit it; -tasks
+                                 rewrites the linking "Tasks:" line ("" clears)
 taskman feature done <slug>      mark a feature shipped
 taskman file [-as filer] <project> <desc>
                                  file an ask into another project's ledger at
@@ -230,10 +235,11 @@ nested headings, sub-sections, and checklists, as deep as the spec needs.
   bounded change (a fix, a chore, one step of a feature).
 - **Write the spec in the body**: motivation, requirements, decisions,
   edge cases. Structure goes into the file, never into child features.
-- **Link the implementing tasks** and keep the `Tasks:` line current: the
-  web UI's link picker toggles membership, its "+ task" creates a task
-  pre-linked, or edit the line by hand (`Tasks: 012, 019`). Chips and the
-  N/M rollup follow the ledger automatically.
+- **Link the implementing tasks** and keep the `Tasks:` line current:
+  `taskman feature update -tasks "012, 019" <slug>` rewrites it (and
+  `taskman feature show <slug>` prints the spec), the web UI's link picker
+  toggles membership, or its "+ task" creates a task pre-linked. Chips and
+  the N/M rollup follow the ledger automatically.
 - **Ship it** (`taskman feature done <slug>` or the ship-it button) when
   the linked tasks are done and the behavior is live; `feature reopen` /
   unship reverses a premature ship.

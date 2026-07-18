@@ -143,6 +143,26 @@ func (f Feature) SetTasks(nums []int) (Feature, error) {
 	return nf, nil
 }
 
+// SetBody replaces the spec's whole content with body, normalized to a single
+// trailing newline -- the same shape the web editor writes, so a round-trip
+// through show/update leaves no spurious diff. The Tasks: line rides inside
+// the body exactly as on disk.
+func (f Feature) SetBody(body string) error {
+	return os.WriteFile(f.Path(), []byte(strings.TrimRight(body, "\n")+"\n"), 0o644)
+}
+
+// AppendRaw appends text to the end of the spec, separated from the existing
+// content by a blank line, adding no heading -- the caller controls the
+// markup.
+func (f Feature) AppendRaw(text string) error {
+	data, err := os.ReadFile(f.Path())
+	if err != nil {
+		return err
+	}
+	out := strings.TrimRight(string(data), "\n") + "\n\n" + strings.Trim(text, "\n") + "\n"
+	return os.WriteFile(f.Path(), []byte(out), 0o644)
+}
+
 // Remove deletes the feature's spec file. Linked tasks are independent
 // files and stay untouched; the removal is one commit, so project undo
 // restores a mistaken discard.

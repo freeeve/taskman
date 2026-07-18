@@ -478,6 +478,87 @@ func TestFeatures(t *testing.T) {
 	}
 }
 
+// TestFeatureShowAndUpdate drives editing a feature spec through the CLI
+// instead of the store file: show prints the raw body, update replaces /
+// appends / relinks tasks and commits.
+func TestFeatureShowAndUpdate(t *testing.T) {
+	home, _ := storeLedger(t, "fedit")
+	featDir := filepath.Join(home, "fedit", "features")
+
+	if err := run([]string{"feature", "new", "Kanban board"}); err != nil {
+		t.Fatalf("feature new: %v", err)
+	}
+	path := filepath.Join(featDir, "kanban-board.md")
+
+	// show prints the raw body; -path prints the file path.
+	out := capture(t, func() { _ = run([]string{"feature", "show", "kanban"}) })
+	if !strings.Contains(out, "# Kanban board") || !strings.Contains(out, "Tasks:") {
+		t.Errorf("feature show body:\n%s", out)
+	}
+	out = capture(t, func() { _ = run([]string{"feature", "show", "-path", "kanban"}) })
+	if strings.TrimSpace(out) != path {
+		t.Errorf("feature show -path = %q, want %q", strings.TrimSpace(out), path)
+	}
+
+	// -tasks rewrites the linking "Tasks:" line (deduped, zero-padded).
+	if err := run([]string{"feature", "update", "-tasks", "12, 5, 5", "kanban"}); err != nil {
+		t.Fatalf("feature update -tasks: %v", err)
+	}
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), "Tasks: 012, 005") {
+		t.Errorf("after -tasks:\n%s", body)
+	}
+	// A non-numeric entry is refused rather than silently unlinking.
+	if err := run([]string{"feature", "update", "-tasks", "12, oops", "kanban"}); err == nil {
+		t.Error("non-numeric -tasks entry should error")
+	}
+	// "" clears every link.
+	if err := run([]string{"feature", "update", "-tasks", "", "kanban"}); err != nil {
+		t.Fatalf("feature update -tasks clear: %v", err)
+	}
+	body, _ = os.ReadFile(path)
+	if strings.Contains(string(body), "012") || !strings.Contains(string(body), "Tasks:") {
+		t.Errorf("clearing tasks left links or dropped the line:\n%s", body)
+	}
+
+	// -append adds to the end without a heading.
+	if err := run([]string{"feature", "update", "-append", "## Notes\n\nAdded via CLI.", "kanban"}); err != nil {
+		t.Fatalf("feature update -append: %v", err)
+	}
+	body, _ = os.ReadFile(path)
+	if !strings.HasSuffix(string(body), "## Notes\n\nAdded via CLI.\n") {
+		t.Errorf("after append:\n%s", body)
+	}
+
+	// -body - replaces the whole spec from stdin, normalized to one newline.
+	withStdin(t, "# Kanban board\n\nTasks: 001\n\nRewritten.\n\n\n", func() {
+		if err := run([]string{"feature", "update", "-body", "-", "kanban"}); err != nil {
+			t.Fatalf("feature update -body -: %v", err)
+		}
+	})
+	body, _ = os.ReadFile(path)
+	if string(body) != "# Kanban board\n\nTasks: 001\n\nRewritten.\n" {
+		t.Errorf("after body replace:\n%q", string(body))
+	}
+
+	// Guards: nothing to do, both replace and append, blank stdin body.
+	if err := run([]string{"feature", "update", "kanban"}); err == nil {
+		t.Error("feature update with no edit flag should error")
+	}
+	if err := run([]string{"feature", "update", "-body", "x", "-append", "y", "kanban"}); err == nil {
+		t.Error("feature update with both -body and -append should error")
+	}
+	withStdin(t, "  \n", func() {
+		if err := run([]string{"feature", "update", "-body", "-", "kanban"}); err == nil {
+			t.Error("feature update -body - with blank stdin should refuse")
+		}
+	})
+
+	if log := git(t, home, "log", "--format=%s"); !strings.Contains(log, "chore(fedit): edit feature kanban-board") {
+		t.Errorf("feature update commit:\n%s", log)
+	}
+}
+
 // TestDecisionFlow drives the interactive-decision CLI end to end: pose via
 // defer -question, bare resume refuses, resume -choose answers, records, and
 // jumps the task to the top of the order; reason-only defer is unchanged.

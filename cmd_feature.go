@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -25,6 +27,10 @@ func cmdFeature(args []string) error {
 		return cmdFeatureNew(args[1:])
 	case "list", "ls":
 		return cmdFeatureList(args[1:])
+	case "show", "cat":
+		return cmdFeatureShow(args[1:])
+	case "update", "edit":
+		return cmdFeatureUpdate(args[1:])
 	case "done":
 		return cmdFeatureSetDone(args[1:], true)
 	case "reopen":
@@ -32,8 +38,152 @@ func cmdFeature(args []string) error {
 	case "rm", "remove":
 		return cmdFeatureRm(args[1:])
 	default:
-		return fmt.Errorf("unknown feature subcommand %q (new|list|done|reopen|rm)", args[0])
+		return fmt.Errorf("unknown feature subcommand %q (new|list|show|update|done|reopen|rm)", args[0])
 	}
+}
+
+// cmdFeatureShow prints a feature spec's raw markdown to stdout, resolved by
+// slug fragment; -path prints the file path instead. The read half of editing
+// a feature through the CLI (see cmdFeatureUpdate), so the store file is never
+// opened by hand.
+func cmdFeatureShow(args []string) error {
+	fs := flag.NewFlagSet("feature show", flag.ContinueOnError)
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	pathOnly := fs.Bool("path", false, "print the feature's file path instead of its body")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: taskman feature show [-p project] [-path] <slug>")
+	}
+	p, err := openProject(*project)
+	if err != nil {
+		return err
+	}
+	features, err := store.LoadFeatures(filepath.Dir(p.Dir))
+	if err != nil {
+		return err
+	}
+	f, err := findFeature(features, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if *pathOnly {
+		fmt.Println(f.Path())
+		return nil
+	}
+	data, err := os.ReadFile(f.Path())
+	if err != nil {
+		return err
+	}
+	_, err = os.Stdout.Write(data)
+	return err
+}
+
+// cmdFeatureUpdate edits a feature spec in place and commits it, so the store
+// file is never hand-edited. -body replaces the whole spec, -append adds to
+// the end, and -tasks rewrites the "Tasks:" line that links implementing
+// tasks (comma/space-separated numbers; "" or "-" clears every link).
+// -body/-append read stdin when given "-". A single-shot CLI holds the store
+// lock for the whole read-modify-write, so no etag is needed. The title and
+// slug stay immutable here, matching the web editor -- a slug rename ripples
+// through deep links and chips and would be a separate step.
+func cmdFeatureUpdate(args []string) error {
+	fs := flag.NewFlagSet("feature update", flag.ContinueOnError)
+	noCommit := fs.Bool("no-commit", false, "skip the git commit")
+	project := fs.String("p", "", "project name (default: resolved from the current directory)")
+	body := fs.String("body", "", `replace the whole spec ("-" reads stdin)`)
+	appendText := fs.String("append", "", `append text to the end of the spec ("-" reads stdin)`)
+	tasks := fs.String("tasks", "", `set the linked task numbers, e.g. "12, 19" ("" or "-" clears)`)
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	if fs.NArg() != 1 {
+		return fmt.Errorf("usage: taskman feature update [-p project] [-no-commit] (-body <md>|- | -append <md>|- | -tasks <nums>) <slug>")
+	}
+	if set["body"] && set["append"] {
+		return fmt.Errorf("-body replaces and -append adds; pass one, not both")
+	}
+	if !set["body"] && !set["append"] && !set["tasks"] {
+		return fmt.Errorf("nothing to update: pass -body, -append, and/or -tasks")
+	}
+	if set["body"] && strings.TrimSpace(*body) == "" && *body != "-" {
+		return fmt.Errorf("-body is empty; a spec needs a body (use -append to add, or pass content)")
+	}
+	if set["body"] && *body == "-" {
+		in, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		if strings.TrimSpace(string(in)) == "" {
+			return fmt.Errorf("stdin was empty; refusing to blank the spec")
+		}
+		*body = string(in)
+	}
+	if set["append"] && *appendText == "-" {
+		in, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			return err
+		}
+		*appendText = string(in)
+	}
+	p, err := openProject(*project)
+	if err != nil {
+		return err
+	}
+	features, err := store.LoadFeatures(filepath.Dir(p.Dir))
+	if err != nil {
+		return err
+	}
+	f, err := findFeature(features, fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	if set["body"] {
+		if err := f.SetBody(*body); err != nil {
+			return err
+		}
+	}
+	if set["append"] {
+		if err := f.AppendRaw(*appendText); err != nil {
+			return err
+		}
+	}
+	if set["tasks"] {
+		nums, err := parseTaskList(*tasks)
+		if err != nil {
+			return err
+		}
+		if _, err := f.SetTasks(nums); err != nil {
+			return err
+		}
+	}
+	fmt.Println(f.Path())
+	p.commit(*noCommit, "edit feature "+f.Slug, f.Path())
+	return nil
+}
+
+// parseTaskList parses a comma/space-separated list of task numbers for the
+// -tasks flag; "-" and the empty string both mean "no links". A non-numeric
+// entry is an error rather than silently dropped, so a typo is caught instead
+// of quietly unlinking a task.
+func parseTaskList(s string) ([]int, error) {
+	s = strings.TrimSpace(s)
+	if s == "" || s == "-" {
+		return nil, nil
+	}
+	fields := strings.FieldsFunc(s, func(r rune) bool { return r == ',' || r == ' ' })
+	nums := make([]int, 0, len(fields))
+	for _, fld := range fields {
+		n, err := strconv.Atoi(strings.TrimSpace(fld))
+		if err != nil {
+			return nil, fmt.Errorf("not a task number: %q", fld)
+		}
+		nums = append(nums, n)
+	}
+	return nums, nil
 }
 
 // cmdFeatureRm discards a feature spec (active or shipped) and commits the

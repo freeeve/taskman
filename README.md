@@ -50,6 +50,9 @@ taskman start <n|slug>           mark in-progress   (rename)
 taskman done <n|slug>            mark done          (rename; prunes order)
 taskman reopen <n|slug>          back to pending    (rename)
 taskman lane <n|slug> <lane|->   set or clear a task's lane (rename)
+taskman move <n|slug> (top | bottom | above <n|slug> | below <n|slug>)
+                                 reprioritize a task in the order list list
+                                 and top follow (above = higher priority)
 taskman defer -reason <why> <n|slug>
                                  hold on an external decision; the reason is
                                  appended to the body and is required

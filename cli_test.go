@@ -5,6 +5,9 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -230,6 +233,109 @@ func TestOrderAndTop(t *testing.T) {
 	// An empty lane errors rather than printing nothing.
 	if err := run([]string{"top", "-lane", "nope"}); err == nil {
 		t.Error("top with no matching tasks must error")
+	}
+}
+
+// orderNums reads the project's order file into the bare numbers it lists,
+// top priority first, skipping the header.
+func orderNums(t *testing.T, home, project string) []int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(home, project, "order"))
+	if err != nil {
+		t.Fatalf("read order: %v", err)
+	}
+	var nums []int
+	for line := range strings.SplitSeq(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		n, err := strconv.Atoi(line)
+		if err != nil {
+			t.Fatalf("bad order line %q", line)
+		}
+		nums = append(nums, n)
+	}
+	return nums
+}
+
+// TestMove drives reprioritizing tasks in the order list from the CLI:
+// top/bottom, above/below another task, the no-op path, and the guards.
+func TestMove(t *testing.T) {
+	home, _ := storeLedger(t, "moveproj",
+		"001_a.md", "002_b.md", "003_c.md", "004_d.md")
+
+	// No order file yet: the first move materializes the full sequence
+	// (existing order, then the rest ascending) with 004 spliced to the top.
+	if err := run([]string{"move", "4", "top"}); err != nil {
+		t.Fatalf("move top: %v", err)
+	}
+	if got := orderNums(t, home, "moveproj"); !reflect.DeepEqual(got, []int{4, 1, 2, 3}) {
+		t.Errorf("after move 4 top: %v", got)
+	}
+
+	// bottom drops the task to last.
+	if err := run([]string{"move", "1", "bottom"}); err != nil {
+		t.Fatalf("move bottom: %v", err)
+	}
+	if got := orderNums(t, home, "moveproj"); !reflect.DeepEqual(got, []int{4, 2, 3, 1}) {
+		t.Errorf("after move 1 bottom: %v", got)
+	}
+
+	// above places the task just ahead of the reference (higher priority).
+	if err := run([]string{"move", "3", "above", "4"}); err != nil {
+		t.Fatalf("move above: %v", err)
+	}
+	if got := orderNums(t, home, "moveproj"); !reflect.DeepEqual(got, []int{3, 4, 2, 1}) {
+		t.Errorf("after move 3 above 4: %v", got)
+	}
+
+	// below places it just after (before/after are synonyms of above/below).
+	if err := run([]string{"move", "2", "after", "3"}); err != nil {
+		t.Fatalf("move after: %v", err)
+	}
+	if got := orderNums(t, home, "moveproj"); !reflect.DeepEqual(got, []int{3, 2, 4, 1}) {
+		t.Errorf("after move 2 after 3: %v", got)
+	}
+
+	// A move that changes nothing makes no commit.
+	before := git(t, home, "rev-parse", "HEAD")
+	out := capture(t, func() { _ = run([]string{"move", "3", "top"}) })
+	if !strings.Contains(out, "already") {
+		t.Errorf("no-op move should report already-there:\n%s", out)
+	}
+	if after := git(t, home, "rev-parse", "HEAD"); after != before {
+		t.Error("no-op move must not commit")
+	}
+
+	// Guards.
+	if err := run([]string{"move", "3", "above", "3"}); err == nil {
+		t.Error("moving a task relative to itself should error")
+	}
+	if err := run([]string{"move", "3", "sideways"}); err == nil {
+		t.Error("an unknown position should error")
+	}
+	if err := run([]string{"move", "3", "above"}); err == nil {
+		t.Error("above with no reference should error")
+	}
+	if err := run([]string{"move", "3", "above", "99"}); err == nil {
+		t.Error("a missing reference task should error")
+	}
+
+	// A done task is not orderable (it is pruned from the order when finished).
+	if err := run([]string{"done", "4"}); err != nil {
+		t.Fatalf("done: %v", err)
+	}
+	if err := run([]string{"move", "4", "top"}); err == nil {
+		t.Error("moving a done task should error")
+	}
+	if got := orderNums(t, home, "moveproj"); slices.Contains(got, 4) {
+		t.Errorf("done task must be pruned from order: %v", got)
+	}
+
+	if log := git(t, home, "log", "--format=%s"); !strings.Contains(log, "chore(moveproj): reorder 004 to top") ||
+		!strings.Contains(log, "chore(moveproj): reorder 002 to after 003") {
+		t.Errorf("reorder commits:\n%s", log)
 	}
 }
 

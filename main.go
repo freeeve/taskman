@@ -55,6 +55,8 @@ func run(args []string) error {
 		return cmdDecisions(rest)
 	case "lane":
 		return cmdLane(rest)
+	case "move", "mv", "reorder":
+		return cmdMove(rest)
 	case "lock":
 		return cmdLock(rest)
 	case "adopt":
@@ -142,6 +144,10 @@ Usage:
                                end; -body/-append read stdin when given "-"
   taskman lane <n|slug> <lane|->
                                set or clear a task's lane (rename)
+  taskman move <n|slug> (top | bottom | above <n|slug> | below <n|slug>)
+                               reprioritize a task in the order list that list
+                               and top follow: top/bottom, or above/below
+                               another task (above = higher priority)
   taskman start <n|slug>       mark in-progress
   taskman done <n|slug>        mark done
   taskman reopen <n|slug>      mark pending again

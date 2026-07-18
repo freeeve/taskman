@@ -95,6 +95,108 @@ func PromoteToTop(projDir string, num int) (string, error) {
 	return WriteOrder(projDir, kept)
 }
 
+// Position is where Reorder places a task relative to the priority list.
+type Position int
+
+const (
+	ToTop    Position = iota // highest priority (first)
+	ToBottom                 // lowest priority (last)
+	Above                    // just above the reference task (higher priority)
+	Below                    // just below the reference task (lower priority)
+)
+
+// Reorder repositions target in the project's priority order and rewrites the
+// whole order file, returning its path ("" when nothing changed, so a no-op
+// move makes no commit). open is the set of orderable (numbered, not-done)
+// task numbers.
+//
+// Because the on-disk order is partial and advisory -- listed tasks first,
+// the rest by ascending number -- "bottom" and "above/below a task" are only
+// well-defined against the full sequence. So Reorder first materializes the
+// current effective order of open tasks (existing order entries, then the
+// remaining numbers ascending, matching SortByOrder), splices target into it,
+// and writes the full list back. One consequence: once an explicit order
+// exists, a newly created task sorts below it until moved.
+func Reorder(projDir string, open []int, target int, pos Position, ref int) (string, error) {
+	openSet := make(map[int]bool, len(open))
+	for _, n := range open {
+		openSet[n] = true
+	}
+	if !openSet[target] {
+		return "", fmt.Errorf("task %03d is not an open task to prioritize", target)
+	}
+	if pos == Above || pos == Below {
+		if target == ref {
+			return "", fmt.Errorf("task %03d can't move relative to itself", target)
+		}
+		if !openSet[ref] {
+			return "", fmt.Errorf("task %03d is not an open task to move relative to", ref)
+		}
+	}
+	seen := map[int]bool{}
+	eff := make([]int, 0, len(open))
+	for _, n := range ReadOrder(projDir) {
+		if openSet[n] && !seen[n] {
+			seen[n] = true
+			eff = append(eff, n)
+		}
+	}
+	rest := make([]int, 0, len(open))
+	for _, n := range open {
+		if !seen[n] {
+			rest = append(rest, n)
+		}
+	}
+	sort.Ints(rest)
+	eff = append(eff, rest...)
+
+	without := make([]int, 0, len(eff))
+	for _, n := range eff {
+		if n != target {
+			without = append(without, n)
+		}
+	}
+	idx := 0
+	switch pos {
+	case ToTop:
+		idx = 0
+	case ToBottom:
+		idx = len(without)
+	case Above, Below:
+		for i, n := range without {
+			if n == ref {
+				idx = i
+				break
+			}
+		}
+		if pos == Below {
+			idx++
+		}
+	}
+	final := make([]int, 0, len(without)+1)
+	final = append(final, without[:idx]...)
+	final = append(final, target)
+	final = append(final, without[idx:]...)
+
+	if sameInts(ReadOrder(projDir), final) {
+		return "", nil
+	}
+	return WriteOrder(projDir, final)
+}
+
+// sameInts reports whether two int slices are element-wise equal.
+func sameInts(a, b []int) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // SortByOrder arranges tasks priority-first: tasks whose numbers appear in
 // order come first in that sequence; everything else keeps ledger order
 // (ascending number, asks last) after them. Unknown numbers in the order and

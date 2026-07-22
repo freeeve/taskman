@@ -22,9 +22,9 @@ const blockedHeader = "# blocked lanes -- raised with `taskman blocked <lane> <m
 // session then removes the entry.
 type Block struct {
 	Lane      string
-	Raised    string // date the block was raised
+	Raised    string // RFC3339 timestamp the block was raised (age is shown from it)
 	Unblocked bool
-	Answered  string // date a responder marked it unblocked
+	Answered  string // RFC3339 timestamp a responder marked it unblocked
 	Message   string
 	Note      string // responder's note when unblocking
 }
@@ -88,9 +88,9 @@ func WriteBlocked(projDir string, blocks []Block) (string, error) {
 
 // SetBlock raises or replaces the block for a lane, newest kept and the oldest
 // dropped once MaxBlocks is reached. Re-raising a lane resets it to blocked.
-func SetBlock(projDir, lane, message, date string) (string, error) {
+func SetBlock(projDir, lane, message, stamp string) (string, error) {
 	blocks := ReadBlocked(projDir)
-	entry := Block{Lane: lane, Raised: date, Message: message}
+	entry := Block{Lane: lane, Raised: stamp, Message: message}
 	out := make([]Block, 0, len(blocks)+1)
 	for _, b := range blocks {
 		if b.Lane != lane {
@@ -125,13 +125,13 @@ func ClearBlock(projDir, lane string) (string, bool, error) {
 
 // UnblockLane marks a lane's block resolved with an optional note; ok reports
 // whether a matching entry existed.
-func UnblockLane(projDir, lane, note, date string) (string, bool, error) {
+func UnblockLane(projDir, lane, note, stamp string) (string, bool, error) {
 	blocks := ReadBlocked(projDir)
 	found := false
 	for i := range blocks {
 		if blocks[i].Lane == lane {
 			blocks[i].Unblocked = true
-			blocks[i].Answered = date
+			blocks[i].Answered = stamp
 			blocks[i].Note = note
 			found = true
 		}

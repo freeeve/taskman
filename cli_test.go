@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/freeeve/taskman/internal/lock"
 )
@@ -404,6 +405,26 @@ func TestBlocked(t *testing.T) {
 		!strings.Contains(log, "chore(blockproj): unblock impl") ||
 		!strings.Contains(log, "chore(blockproj): clear block impl") {
 		t.Errorf("blocked commits:\n%s", log)
+	}
+}
+
+// TestHumanizeBlockAge covers the stall board's age column: RFC3339 blocks
+// coarsen to one unit, the legacy date-only form still reads, and an
+// unparseable stamp shows raw rather than lying.
+func TestHumanizeBlockAge(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.UTC)
+	cases := []struct{ stamp, want string }{
+		{now.Add(-30 * time.Second).Format(time.RFC3339), "<1m"},
+		{now.Add(-5 * time.Minute).Format(time.RFC3339), "5m"},
+		{now.Add(-3 * time.Hour).Format(time.RFC3339), "3h"},
+		{now.Add(-50 * time.Hour).Format(time.RFC3339), "2d"},
+		{"2026-07-20", "2d"}, // legacy date-only, from that day's start
+		{"not-a-time", "not-a-time"},
+	}
+	for _, c := range cases {
+		if got := humanizeAge(c.stamp, now); got != c.want {
+			t.Errorf("humanizeAge(%q) = %q, want %q", c.stamp, got, c.want)
+		}
 	}
 }
 

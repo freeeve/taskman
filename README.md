@@ -53,6 +53,12 @@ taskman lane <n|slug> <lane|->   set or clear a task's lane (rename)
 taskman move <n|slug> (top | bottom | above <n|slug> | below <n|slug>)
                                  reprioritize a task in the order list list
                                  and top follow (above = higher priority)
+taskman blocked                  list active cross-session blocks
+taskman blocked <lane> "<msg>"   raise your lane's block (name the task(s)
+                                 you're doing, the blocking task(s), and the
+                                 lane that owns them); empty message clears it
+taskman blocked -unblock <lane> [note]
+                                 respond that a lane is unblocked
 taskman defer -reason <why> <n|slug>
                                  hold on an external decision; the reason is
                                  appended to the body and is required
@@ -397,6 +403,31 @@ What makes this safe to leave running:
   becomes one decision with an option per choice, a confirmation becomes a
   yes/no decision, and a bare hold becomes a `defer -reason`. If nothing is
   posed and nothing is unblocked, the correct turn is silence, not narration.
+
+### Cross-session blocks (`taskman blocked`)
+
+`defer` is for a blocker only a *human* can clear -- it goes to the decisions
+inbox. When a session instead stalls on work **another lane owns** (it can't
+touch that code, or the fix is that lane's call), it raises a one-line block
+so the owning lane sees it and acts, instead of idling until the next sweep
+happens to unstick it. One entry per lane, capped and glanceable.
+
+Add to each session's loop prompt (`~/.claude/CLAUDE.md` or the loop itself):
+
+```
+Cross-session unblocking, every cycle:
+- Run `taskman blocked` first. If an entry names YOUR lane as owning the
+  blocking task, that handoff is yours: clear it, then respond
+  `taskman blocked -unblock <their-lane> "<what you did / commit>"`.
+- If you go idle because you need work another lane owns and cannot do it
+  yourself (ownership or permission), raise one line instead of waiting:
+  `taskman blocked <your-lane> "doing <task(s)>; blocked by <task(s)>, owned
+  by <lane>"`. Keep it to a sentence -- it is a signal, not a report.
+- Re-raising your lane replaces your entry; there is at most one per lane.
+- When your block is resolved (listed as `unblocked`, or the blocker is
+  done), proceed and clear your own entry: `taskman blocked <your-lane> ""`.
+- A blocker waiting on a person is still a `defer`, not a block.
+```
 
 ## Install
 

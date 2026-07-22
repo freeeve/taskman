@@ -57,6 +57,8 @@ func run(args []string) error {
 		return cmdLane(rest)
 	case "move", "mv", "reorder":
 		return cmdMove(rest)
+	case "blocked", "block":
+		return cmdBlocked(rest)
 	case "lock":
 		return cmdLock(rest)
 	case "adopt":
@@ -148,6 +150,13 @@ Usage:
                                reprioritize a task in the order list that list
                                and top follow: top/bottom, or above/below
                                another task (above = higher priority)
+  taskman blocked [<lane> "<message>" | -unblock <lane> [note]]
+                               cross-session stall board: with no args, list
+                               active blocks; <lane> <message> raises your
+                               lane's block (name the task(s) you're doing, the
+                               blocking task(s), and the lane that owns them),
+                               an empty message clears it; -unblock <lane>
+                               responds that a lane is unblocked
   taskman start <n|slug>       mark in-progress
   taskman done <n|slug>        mark done
   taskman reopen <n|slug>      mark pending again

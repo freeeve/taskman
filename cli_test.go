@@ -339,6 +339,91 @@ func TestMove(t *testing.T) {
 	}
 }
 
+// TestBlocked drives the cross-session stall board: raise, list, respond with
+// -unblock, clear, one-entry-per-lane, and the guards.
+func TestBlocked(t *testing.T) {
+	home, _ := storeLedger(t, "blockproj", "001_a.md")
+	blockedFile := filepath.Join(home, "blockproj", "blocked")
+
+	// Empty board.
+	out := capture(t, func() { _ = run([]string{"blocked"}) })
+	if !strings.Contains(out, "no blocked lanes") {
+		t.Errorf("empty board:\n%s", out)
+	}
+
+	// Raise a block; it lists as blocked with the message.
+	if err := run([]string{"blocked", "impl", "doing task 45; blocked by task 60 (game lane)"}); err != nil {
+		t.Fatalf("raise: %v", err)
+	}
+	out = capture(t, func() { _ = run([]string{"blocked"}) })
+	if !strings.Contains(out, "impl") || !strings.Contains(out, "blocked") ||
+		!strings.Contains(out, "task 60") {
+		t.Errorf("after raise:\n%s", out)
+	}
+
+	// Re-raising the same lane replaces (one entry per lane).
+	if err := run([]string{"blocked", "impl", "now blocked by task 61"}); err != nil {
+		t.Fatalf("re-raise: %v", err)
+	}
+	if got := blockedLanes(t, blockedFile); len(got) != 1 {
+		t.Errorf("one entry per lane, got %d: %v", len(got), got)
+	}
+
+	// A second lane coexists.
+	if err := run([]string{"blocked", "e2e", "blocked by task 88 (impl lane)"}); err != nil {
+		t.Fatalf("second lane: %v", err)
+	}
+
+	// Respond: mark impl unblocked with a note.
+	if err := run([]string{"blocked", "-unblock", "impl", "fixed in a1b2c3"}); err != nil {
+		t.Fatalf("unblock: %v", err)
+	}
+	out = capture(t, func() { _ = run([]string{"blocked"}) })
+	if !strings.Contains(out, "unblocked") || !strings.Contains(out, "a1b2c3") {
+		t.Errorf("after unblock:\n%s", out)
+	}
+
+	// The raising session clears its own block with an empty message.
+	if err := run([]string{"blocked", "impl", ""}); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+	if got := blockedLanes(t, blockedFile); len(got) != 1 || got[0] != "e2e" {
+		t.Errorf("after clear, want just e2e: %v", got)
+	}
+
+	// Guards: unblock a lane with no block, and clear a lane with no block.
+	if err := run([]string{"blocked", "-unblock", "nope"}); err == nil {
+		t.Error("unblocking a lane with no block should error")
+	}
+	out = capture(t, func() { _ = run([]string{"blocked", "nope", ""}) })
+	if !strings.Contains(out, "no block") {
+		t.Errorf("clearing an absent lane should say so:\n%s", out)
+	}
+
+	if log := git(t, home, "log", "--format=%s"); !strings.Contains(log, "chore(blockproj): block impl") ||
+		!strings.Contains(log, "chore(blockproj): unblock impl") ||
+		!strings.Contains(log, "chore(blockproj): clear block impl") {
+		t.Errorf("blocked commits:\n%s", log)
+	}
+}
+
+// blockedLanes returns the lane column of every row in a blocked file.
+func blockedLanes(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read blocked: %v", err)
+	}
+	var lanes []string
+	for line := range strings.SplitSeq(string(data), "\n") {
+		if strings.TrimSpace(line) == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		lanes = append(lanes, strings.SplitN(line, "\t", 2)[0])
+	}
+	return lanes
+}
+
 // TestLanes drives lane routing through the CLI: new -lane, the list filter,
 // and the lane command's set/clear renames.
 func TestLanes(t *testing.T) {
